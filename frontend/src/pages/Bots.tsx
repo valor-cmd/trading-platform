@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   getBotStatus, getBotsRunning, startBots, stopBots,
   getArbOpportunities, getArbStatus, getExchangesStatus,
+  getExchangePairs,
 } from "../services/api";
 
 interface BotTrade {
@@ -64,6 +65,127 @@ const botConfig: Record<string, { icon: string; label: string; timeframes: strin
   long_term: { icon: "📈", label: "Long Term", timeframes: "1d · 1w", interval: "1h" },
 };
 
+function ExchangeDropdown({ eid, label, pairCount, icon }: { eid: string; label: string; pairCount: number; icon: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [search, setSearch] = useState("");
+  const [pairs, setPairs] = useState<string[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const fetchPairs = useCallback(async (query: string) => {
+    setLoading(true);
+    try {
+      const res = await getExchangePairs(eid, query, 100, 0);
+      setPairs(res.data.pairs || []);
+      setTotal(res.data.total || 0);
+    } catch {
+      setPairs([]);
+      setTotal(0);
+    }
+    setLoading(false);
+  }, [eid]);
+
+  useEffect(() => {
+    if (expanded && pairs.length === 0 && !search) {
+      fetchPairs("");
+    }
+  }, [expanded, fetchPairs, pairs.length, search]);
+
+  const handleSearch = (val: string) => {
+    setSearch(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchPairs(val), 300);
+  };
+
+  return (
+    <div className="asset-row" style={{ display: "block", padding: 0 }}>
+      <div
+        style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "0.75rem 1rem", cursor: "pointer", userSelect: "none",
+        }}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="asset-info">
+          <div className="asset-icon" style={{ fontSize: "0.7rem" }}>{icon}</div>
+          <div>
+            <div className="asset-name">{label || eid}</div>
+            <div className="asset-price">
+              {eid.includes("dex") ? "DEX" : "Real-time prices"} · {pairCount.toLocaleString()} pairs
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div className="asset-value">
+            <div className="asset-amount">{pairCount.toLocaleString()}</div>
+            <div className="asset-usd">pairs</div>
+          </div>
+          <span style={{
+            fontSize: "0.7rem", transition: "transform 0.2s",
+            transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+          }}>
+            ▼
+          </span>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{
+          borderTop: "1px solid var(--border)", padding: "0.75rem 1rem",
+          maxHeight: "320px", display: "flex", flexDirection: "column",
+        }}>
+          <input
+            type="text"
+            placeholder={`Search ${pairCount.toLocaleString()} pairs...`}
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            style={{
+              width: "100%", padding: "0.5rem 0.75rem",
+              background: "var(--bg-secondary)", border: "1px solid var(--border)",
+              borderRadius: "6px", color: "var(--text-primary)", fontSize: "0.8rem",
+              marginBottom: "0.5rem", outline: "none",
+            }}
+          />
+          {loading ? (
+            <div style={{ textAlign: "center", padding: "1rem", color: "var(--text-tertiary)", fontSize: "0.8rem" }}>
+              Loading...
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: "0.7rem", color: "var(--text-tertiary)", marginBottom: "0.4rem" }}>
+                Showing {pairs.length} of {total.toLocaleString()} {search ? "matching" : "total"} pairs
+              </div>
+              <div style={{ overflowY: "auto", maxHeight: "220px" }}>
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+                  gap: "0.3rem",
+                }}>
+                  {pairs.map((p) => (
+                    <div key={p} style={{
+                      padding: "0.3rem 0.5rem", fontSize: "0.75rem",
+                      background: "var(--bg-secondary)", borderRadius: "4px",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      color: "var(--text-primary)",
+                    }}>
+                      {p}
+                    </div>
+                  ))}
+                </div>
+                {pairs.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "1rem", color: "var(--text-tertiary)", fontSize: "0.8rem" }}>
+                    {search ? "No pairs match your search" : "No pairs available"}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Bots() {
   const [bots, setBots] = useState<Record<string, BotData>>({});
   const [botRunning, setBotRunning] = useState<Record<string, { running: boolean; active_trades: number }>>({});
@@ -124,6 +246,7 @@ function Bots() {
     + (arbStatus?.trades_executed ?? 0);
 
   const liveExchangeEntries = Object.entries(livePrices).filter(([, v]) => v.connected);
+  const dexEntries = Object.entries(exchanges).filter(([eid]) => eid.includes("dex"));
 
   return (
     <div>
@@ -165,7 +288,7 @@ function Bots() {
       <div className="grid grid-4 mb-md">
         <div className="card stat-card">
           <h3>Price Sources</h3>
-          <div className="value">{liveExchangeEntries.length}</div>
+          <div className="value">{liveExchangeEntries.length + dexEntries.length}</div>
           <div className="value-sm">Live Exchanges</div>
         </div>
         <div className="card stat-card">
@@ -188,47 +311,28 @@ function Bots() {
       <div className="card mb-md">
         <div className="card-header">
           <h3>Live Price Sources</h3>
+          <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
+            Click to expand pairs · Search any asset
+          </span>
         </div>
         {liveExchangeEntries.map(([eid, ex]) => (
-          <div className="asset-row" key={eid}>
-            <div className="asset-info">
-              <div className="asset-icon" style={{ fontSize: "0.7rem" }}>
-                🏦
-              </div>
-              <div>
-                <div className="asset-name">{ex.label || eid}</div>
-                <div className="asset-price">
-                  Real-time prices · No API key needed
-                </div>
-              </div>
-            </div>
-            <div className="asset-value">
-              <div className="asset-amount">{ex.pairs.toLocaleString()}</div>
-              <div className="asset-usd">pairs</div>
-            </div>
-          </div>
+          <ExchangeDropdown
+            key={eid}
+            eid={eid}
+            label={ex.label || eid}
+            pairCount={ex.pairs}
+            icon="🏦"
+          />
         ))}
-        {Object.entries(exchanges)
-          .filter(([eid]) => eid.includes("dex"))
-          .map(([eid, ex]) => (
-            <div className="asset-row" key={eid}>
-              <div className="asset-info">
-                <div className="asset-icon" style={{ fontSize: "0.7rem" }}>
-                  🔗
-                </div>
-                <div>
-                  <div className="asset-name">{eid}</div>
-                  <div className="asset-price">
-                    {ex.type.toUpperCase()} {ex.chain ? `· ${ex.chain}` : ""}
-                  </div>
-                </div>
-              </div>
-              <div className="asset-value">
-                <div className="asset-amount">{ex.pairs}</div>
-                <div className="asset-usd">pairs</div>
-              </div>
-            </div>
-          ))}
+        {dexEntries.map(([eid, ex]) => (
+          <ExchangeDropdown
+            key={eid}
+            eid={eid}
+            label={eid.replace("_", " ").replace("dex", "DEX")}
+            pairCount={ex.pairs}
+            icon="🔗"
+          />
+        ))}
       </div>
 
       <div className="tabs mb-md">

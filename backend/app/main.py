@@ -210,6 +210,20 @@ async def all_pairs():
     return exchange_registry.get_all_symbols()
 
 
+@app.get("/api/exchanges/{exchange_id}/pairs")
+async def exchange_pairs(exchange_id: str, q: str = "", limit: int = 200, offset: int = 0):
+    adapter = exchange_registry.get(exchange_id)
+    if not adapter:
+        return {"exchange_id": exchange_id, "pairs": [], "total": 0}
+    all_syms = adapter.get_all_symbols()
+    if q:
+        q_upper = q.upper()
+        all_syms = [s for s in all_syms if q_upper in s.upper()]
+    total = len(all_syms)
+    page = sorted(all_syms)[offset:offset + limit]
+    return {"exchange_id": exchange_id, "pairs": page, "total": total}
+
+
 @app.get("/api/arbitrage/opportunities")
 async def arb_opportunities(min_profit: float = 0.0, limit: int = 50):
     return arb_bot.arb_engine.get_opportunities(min_profit, limit)
