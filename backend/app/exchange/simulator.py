@@ -1,0 +1,108 @@
+import time
+import logging
+import pandas as pd
+from datetime import datetime, timezone
+from typing import Optional
+
+from app.exchange.live_prices import live_prices
+
+logger = logging.getLogger(__name__)
+
+
+class PaperExchangeManager:
+    def __init__(self):
+        self.balances: dict[str, float] = {}
+        self.connected_exchanges: set[str] = set()
+        self.order_count = 0
+        self._primary_exchange = "binance"
+
+    def connect(self, exchange_id: str):
+        self.connected_exchanges.add(exchange_id)
+
+    def is_connected(self, exchange_id: str) -> bool:
+        return exchange_id in self.connected_exchanges
+
+    def get_all_symbols(self) -> list[str]:
+        return live_prices.get_symbols(self._primary_exchange)
+
+    def get_symbols_for_exchange(self, exchange_id: str) -> list[str]:
+        return live_prices.get_symbols(exchange_id)
+
+    async def fetch_ohlcv(self, exchange_id: str, symbol: str, timeframe: str = "1h", limit: int = 200) -> pd.DataFrame:
+        ex = self._resolve_exchange(symbol)
+        return await live_prices.fetch_ohlcv(ex, symbol, timeframe, limit)
+
+    async def fetch_ticker(self, exchange_id: str, symbol: str) -> dict:
+        ex = self._resolve_exchange(symbol)
+        return await live_prices.fetch_ticker(ex, symbol)
+
+    async def fetch_balance(self, exchange_id: str) -> dict:
+        total = {}
+        for asset, amount in self.balances.items():
+            total[asset] = amount
+        return {
+            "total": total,
+            "free": dict(total),
+            "used": {k: 0 for k in total},
+        }
+
+    async def get_trading_fee(self, exchange_id: str, symbol: str) -> float:
+        ex = self._resolve_exchange(symbol)
+        return live_prices.get_fee(ex, symbol)
+
+    async def create_order(
+        self,
+        exchange_id: str,
+        symbol: str,
+        side: str,
+        amount: float,
+        price: Optional[float] = None,
+        order_type: str = "market",
+    ) -> dict:
+        self.order_count += 1
+        if price is None:
+            ex = self._resolve_exchange(symbol)
+            ticker = await live_prices.fetch_ticker(ex, symbol)
+            price = ticker["last"]
+
+        base = symbol.split("/")[0]
+        quote = symbol.split("/")[1] if "/" in symbol else "USDT"
+        fee_rate = await self.get_trading_fee(exchange_id, symbol)
+
+        if side == "buy":
+            cost = amount * price
+            fee = cost * fee_rate
+            self.balances[quote] = self.balances.get(quote, 0) - cost - fee
+            self.balances[base] = self.balances.get(base, 0) + amount
+        else:
+            revenue = amount * price
+            fee = revenue * fee_rate
+            self.balances[base] = self.balances.get(base, 0) - amount
+            self.balances[quote] = self.balances.get(quote, 0) + revenue - fee
+
+        return {
+            "id": f"paper_{self.order_count}_{int(time.time())}",
+            "exchange": exchange_id,
+            "symbol": symbol,
+            "side": side,
+            "amount": amount,
+            "price": price,
+            "cost": amount * price,
+            "fee": amount * price * fee_rate,
+            "type": order_type,
+            "status": "filled",
+            "paper": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def close_all(self):
+        self.connected_exchanges.clear()
+
+    def _resolve_exchange(self, symbol: str) -> str:
+        for eid in [self._primary_exchange] + list(live_prices.get_exchanges()):
+            if symbol in live_prices.get_symbols(eid):
+                return eid
+        return self._primary_exchange
+
+
+paper_exchange = PaperExchangeManager()

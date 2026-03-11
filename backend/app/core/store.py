@@ -1,0 +1,201 @@
+import json
+import asyncio
+from datetime import datetime, timezone
+from typing import Optional
+from collections import defaultdict
+
+
+class InMemoryStore:
+    def __init__(self):
+        self.data: dict[str, str] = {}
+        self.hashes: dict[str, dict[str, str]] = defaultdict(dict)
+        self.subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
+
+    async def get(self, key: str) -> Optional[str]:
+        return self.data.get(key)
+
+    async def set(self, key: str, value: str, ex: Optional[int] = None):
+        self.data[key] = value
+
+    async def hset(self, name: str, key: str, value: str):
+        self.hashes[name][key] = value
+
+    async def hgetall(self, name: str) -> dict[str, str]:
+        return dict(self.hashes.get(name, {}))
+
+    async def hdel(self, name: str, key: str):
+        self.hashes.get(name, {}).pop(key, None)
+
+    async def publish(self, channel: str, message: str):
+        for queue in self.subscribers.get(channel, []):
+            await queue.put({"type": "message", "data": message})
+
+    def pubsub(self):
+        return InMemoryPubSub(self)
+
+
+class InMemoryPubSub:
+    def __init__(self, store: InMemoryStore):
+        self.store = store
+        self.queue: asyncio.Queue = asyncio.Queue()
+        self.channels: list[str] = []
+
+    async def subscribe(self, channel: str):
+        self.channels.append(channel)
+        self.store.subscribers[channel].append(self.queue)
+
+    async def listen(self):
+        while True:
+            msg = await self.queue.get()
+            yield msg
+
+
+store = InMemoryStore()
+
+
+class TradeStore:
+    def __init__(self):
+        self.trades: list[dict] = []
+        self.deposits: list[dict] = []
+        self.withdrawals: list[dict] = []
+        self.snapshots: list[dict] = []
+        self._next_id = 1
+        self._running_balance = 0.0
+
+    def next_id(self) -> int:
+        i = self._next_id
+        self._next_id += 1
+        return i
+
+    def add_trade(self, trade: dict) -> dict:
+        trade["id"] = self.next_id()
+        if "opened_at" not in trade:
+            trade["opened_at"] = datetime.now(timezone.utc).isoformat()
+        if "status" not in trade:
+            trade["status"] = "open"
+        trade["balance_at_entry"] = round(self._running_balance, 2)
+        self.trades.append(trade)
+        return trade
+
+    def close_trade(self, trade_id: int, exit_price: float, pnl_usd: float, exit_fee: float, status: str = "closed") -> Optional[dict]:
+        for t in self.trades:
+            if t["id"] == trade_id:
+                t["exit_price"] = exit_price
+                t["pnl_usd"] = pnl_usd
+                t["pnl_pct"] = (pnl_usd / (t["entry_price"] * t["quantity"])) * 100 if t.get("quantity") and t.get("entry_price") else 0
+                t["exit_fee_usd"] = exit_fee
+                t["status"] = status
+                t["closed_at"] = datetime.now(timezone.utc).isoformat()
+                self._running_balance += pnl_usd
+                t["balance_at_exit"] = round(self._running_balance, 2)
+                return t
+        return None
+
+    def get_open_trades(self) -> list[dict]:
+        return [t for t in self.trades if t.get("status") == "open"]
+
+    def get_closed_trades(self) -> list[dict]:
+        return [t for t in self.trades if t.get("status") in ("closed", "stopped_out")]
+
+    def add_deposit(self, dep: dict) -> dict:
+        dep["id"] = self.next_id()
+        dep["timestamp"] = datetime.now(timezone.utc).isoformat()
+        self.deposits.append(dep)
+        self._running_balance += dep.get("amount_usd", 0)
+        return dep
+
+    def add_withdrawal(self, wd: dict) -> dict:
+        wd["id"] = self.next_id()
+        wd["timestamp"] = datetime.now(timezone.utc).isoformat()
+        self.withdrawals.append(wd)
+        self._running_balance -= wd.get("amount_usd", 0)
+        return wd
+
+    def total_deposits(self) -> float:
+        return sum(d.get("amount_usd", 0) for d in self.deposits)
+
+    def total_withdrawals(self) -> float:
+        return sum(w.get("amount_usd", 0) for w in self.withdrawals)
+
+    def total_pnl(self) -> dict:
+        closed = self.get_closed_trades()
+        total_pnl = sum(t.get("pnl_usd", 0) for t in closed)
+        total_fees = sum(t.get("entry_fee_usd", 0) + t.get("exit_fee_usd", 0) for t in closed)
+        return {
+            "total_pnl_usd": round(total_pnl, 2),
+            "total_fees_usd": round(total_fees, 2),
+            "net_pnl_usd": round(total_pnl, 2),
+            "total_trades": len(closed),
+        }
+
+    def win_rate(self) -> dict:
+        closed = self.get_closed_trades()
+        winners = [t for t in closed if t.get("pnl_usd", 0) > 0]
+        total = len(closed)
+        return {
+            "total_trades": total,
+            "winning_trades": len(winners),
+            "losing_trades": total - len(winners),
+            "win_rate": round(len(winners) / total * 100, 1) if total > 0 else 0.0,
+        }
+
+    def pnl_by_bot(self) -> dict:
+        result = {}
+        for t in self.get_closed_trades():
+            bot = t.get("bot_type", "unknown")
+            if bot not in result:
+                result[bot] = {"pnl_usd": 0, "trades": 0}
+            result[bot]["pnl_usd"] = round(result[bot]["pnl_usd"] + t.get("pnl_usd", 0), 2)
+            result[bot]["trades"] += 1
+        return result
+
+    def pnl_by_date(self, days: int = 30) -> list[dict]:
+        from collections import defaultdict
+        daily = defaultdict(lambda: {"pnl_usd": 0, "trades": 0})
+        for t in self.get_closed_trades():
+            date = t.get("closed_at", "")[:10]
+            if date:
+                daily[date]["pnl_usd"] = round(daily[date]["pnl_usd"] + t.get("pnl_usd", 0), 2)
+                daily[date]["trades"] += 1
+        return [{"date": k, **v} for k, v in sorted(daily.items())[-days:]]
+
+    def total_fees(self) -> float:
+        total = 0.0
+        for t in self.trades:
+            total += t.get("entry_fee_usd", 0)
+            total += t.get("exit_fee_usd", 0)
+        return round(total, 2)
+
+    def trades_with_running_balance(self) -> list[dict]:
+        result = []
+        for t in self.trades:
+            entry = dict(t)
+            entry["balance_at_entry"] = t.get("balance_at_entry", 0)
+            entry["balance_at_exit"] = t.get("balance_at_exit", None)
+            result.append(entry)
+        return result
+
+    def full_accounting(self) -> dict:
+        pnl = self.total_pnl()
+        deps = self.total_deposits()
+        wds = self.total_withdrawals()
+        return {
+            "summary": {
+                "total_deposits_usd": round(deps, 2),
+                "total_withdrawals_usd": round(wds, 2),
+                "net_deposits_usd": round(deps - wds, 2),
+                "total_pnl_usd": pnl["total_pnl_usd"],
+                "total_fees_usd": pnl["total_fees_usd"],
+                "net_pnl_usd": pnl["net_pnl_usd"],
+                "total_trades": pnl["total_trades"],
+                "account_value_usd": round((deps - wds) + pnl["net_pnl_usd"], 2),
+                "total_fees_all_time": self.total_fees(),
+                "running_balance": round(self._running_balance, 2),
+            },
+            "win_rate": self.win_rate(),
+            "pnl_by_bot": self.pnl_by_bot(),
+            "pnl_by_date": self.pnl_by_date(),
+        }
+
+
+trade_store = TradeStore()

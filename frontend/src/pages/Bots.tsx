@@ -1,0 +1,414 @@
+import { useEffect, useState } from "react";
+import {
+  getBotStatus, getBotsRunning, startBots, stopBots,
+  getArbOpportunities, getArbStatus, getExchangesStatus,
+} from "../services/api";
+
+interface BotTrade {
+  order_id: string;
+  symbol: string;
+  side: string;
+  entry_price: number;
+  amount: number;
+  position_usd: number;
+  stop_loss: number;
+  take_profit: number | null;
+  opened_at: string;
+  reasoning: string;
+  signal_confidence: number;
+}
+
+interface BotData {
+  active_trades: number;
+  trades: BotTrade[];
+}
+
+interface ArbOpp {
+  symbol: string;
+  buy_exchange: string;
+  sell_exchange: string;
+  buy_price: number;
+  sell_price: number;
+  spread_pct: number;
+  estimated_profit_pct: number;
+  is_actionable: boolean;
+  timestamp: string;
+}
+
+interface ArbStatusData {
+  running: boolean;
+  cycles: number;
+  trades_executed: number;
+  current_opportunities: number;
+  actionable: number;
+  common_pairs: number;
+  exchanges_connected: number;
+}
+
+interface ExchangeInfo {
+  type: string;
+  chain: string | null;
+  connected: boolean;
+  pairs: number;
+}
+
+interface LivePriceInfo {
+  label: string;
+  pairs: number;
+  connected: boolean;
+}
+
+const botConfig: Record<string, { icon: string; label: string; timeframes: string; interval: string }> = {
+  scalper: { icon: "⚡", label: "Scalper", timeframes: "5m · 15m", interval: "30s" },
+  swing: { icon: "〰", label: "Swing", timeframes: "1h · 4h", interval: "5m" },
+  long_term: { icon: "📈", label: "Long Term", timeframes: "1d · 1w", interval: "1h" },
+};
+
+function Bots() {
+  const [bots, setBots] = useState<Record<string, BotData>>({});
+  const [botRunning, setBotRunning] = useState<Record<string, { running: boolean; active_trades: number }>>({});
+  const [arbStatus, setArbStatus] = useState<ArbStatusData | null>(null);
+  const [arbOpps, setArbOpps] = useState<ArbOpp[]>([]);
+  const [exchanges, setExchanges] = useState<Record<string, ExchangeInfo>>({});
+  const [livePrices, setLivePrices] = useState<Record<string, LivePriceInfo>>({});
+  const [totalSymbols, setTotalSymbols] = useState(0);
+  const [commonPairs, setCommonPairs] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
+
+  const load = async () => {
+    try {
+      const [botRes, runRes, arbStatRes, arbOppRes, exRes] = await Promise.all([
+        getBotStatus(),
+        getBotsRunning(),
+        getArbStatus(),
+        getArbOpportunities(0, 20),
+        getExchangesStatus(),
+      ]);
+      setBots(botRes.data);
+      setBotRunning(runRes.data);
+      setArbStatus(arbStatRes.data);
+      setArbOpps(arbOppRes.data);
+      setExchanges(exRes.data.exchanges || {});
+      setLivePrices(exRes.data.live_prices || {});
+      setTotalSymbols(exRes.data.total_symbols || 0);
+      setCommonPairs(exRes.data.common_pairs || 0);
+      const anyRunning = Object.values(runRes.data).some((b: unknown) => {
+        const bot = b as { running?: boolean };
+        return bot?.running === true;
+      });
+      setRunning(anyRunning);
+    } catch {
+      /* API not connected */
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleStart = async () => {
+    await startBots("paper");
+    setRunning(true);
+    setTimeout(load, 2000);
+  };
+
+  const handleStop = async () => {
+    await stopBots();
+    setRunning(false);
+  };
+
+  const totalTrades = Object.values(bots).reduce((sum, b) => sum + (b?.active_trades ?? 0), 0)
+    + (arbStatus?.trades_executed ?? 0);
+
+  const liveExchangeEntries = Object.entries(livePrices).filter(([, v]) => v.connected);
+
+  return (
+    <div>
+      <div className="page-header">
+        <h2>Bot Management</h2>
+        <div className="flex gap-sm" style={{ alignItems: "center" }}>
+          <span className="badge badge-active" style={{ fontSize: "0.7rem", marginRight: "0.5rem" }}>
+            LIVE DATA
+          </span>
+          <span className={`badge ${running ? "badge-active" : "badge-stopped"}`}>
+            <span className="badge-dot" />
+            {running ? "Running" : "Stopped"}
+          </span>
+        </div>
+      </div>
+
+      <div className="card mb-md" style={{ textAlign: "center", padding: "1.5rem" }}>
+        <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)", marginBottom: "0.4rem" }}>
+          Total Active Positions
+        </div>
+        <div style={{ fontSize: "2rem", fontWeight: 800 }}>{totalTrades}</div>
+
+        <div style={{
+          display: "flex", gap: "0.75rem", justifyContent: "center",
+          alignItems: "center", marginTop: "1.25rem", flexWrap: "wrap"
+        }}>
+          {!running ? (
+            <button className="btn btn-success" onClick={handleStart}>
+              Start All Bots
+            </button>
+          ) : (
+            <button className="btn btn-danger" onClick={handleStop}>
+              Stop All Bots
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-4 mb-md">
+        <div className="card stat-card">
+          <h3>Price Sources</h3>
+          <div className="value">{liveExchangeEntries.length}</div>
+          <div className="value-sm">Live Exchanges</div>
+        </div>
+        <div className="card stat-card">
+          <h3>Total Pairs</h3>
+          <div className="value">{totalSymbols.toLocaleString()}</div>
+          <div className="value-sm">Real Market Data</div>
+        </div>
+        <div className="card stat-card">
+          <h3>Cross-Exchange</h3>
+          <div className="value">{commonPairs.toLocaleString()}</div>
+          <div className="value-sm">Arb Candidates</div>
+        </div>
+        <div className="card stat-card green">
+          <h3>Arb Trades</h3>
+          <div className="value">{arbStatus?.trades_executed ?? 0}</div>
+          <div className="value-sm">Executed</div>
+        </div>
+      </div>
+
+      <div className="card mb-md">
+        <div className="card-header">
+          <h3>Live Price Sources</h3>
+        </div>
+        {liveExchangeEntries.map(([eid, ex]) => (
+          <div className="asset-row" key={eid}>
+            <div className="asset-info">
+              <div className="asset-icon" style={{ fontSize: "0.7rem" }}>
+                🏦
+              </div>
+              <div>
+                <div className="asset-name">{ex.label || eid}</div>
+                <div className="asset-price">
+                  Real-time prices · No API key needed
+                </div>
+              </div>
+            </div>
+            <div className="asset-value">
+              <div className="asset-amount">{ex.pairs.toLocaleString()}</div>
+              <div className="asset-usd">pairs</div>
+            </div>
+          </div>
+        ))}
+        {Object.entries(exchanges)
+          .filter(([eid]) => eid.includes("dex"))
+          .map(([eid, ex]) => (
+            <div className="asset-row" key={eid}>
+              <div className="asset-info">
+                <div className="asset-icon" style={{ fontSize: "0.7rem" }}>
+                  🔗
+                </div>
+                <div>
+                  <div className="asset-name">{eid}</div>
+                  <div className="asset-price">
+                    {ex.type.toUpperCase()} {ex.chain ? `· ${ex.chain}` : ""}
+                  </div>
+                </div>
+              </div>
+              <div className="asset-value">
+                <div className="asset-amount">{ex.pairs}</div>
+                <div className="asset-usd">pairs</div>
+              </div>
+            </div>
+          ))}
+      </div>
+
+      <div className="tabs mb-md">
+        {["all", "scalper", "swing", "long_term", "arbitrage"].map((tab) => (
+          <button
+            key={tab}
+            className={`tab ${activeTab === tab ? "active" : ""}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab === "all" ? "All Bots" : tab === "arbitrage" ? "Arbitrage" : botConfig[tab]?.label}
+          </button>
+        ))}
+      </div>
+
+      {(activeTab === "all" || activeTab === "arbitrage") && (
+        <div className="card mb-md">
+          <div className="card-header">
+            <div className="flex gap-sm" style={{ alignItems: "center" }}>
+              <div className="asset-icon" style={{ width: 36, height: 36, fontSize: "1rem" }}>
+                🔄
+              </div>
+              <div>
+                <div style={{ fontWeight: 600 }}>Arbitrage Bot</div>
+                <div className="text-sm text-secondary">
+                  {arbStatus?.exchanges_connected ?? 0} exchanges · {commonPairs.toLocaleString()} cross-pairs · 30s
+                </div>
+              </div>
+            </div>
+            <span className={`badge ${arbStatus?.running ? "badge-active" : "badge-stopped"}`}>
+              <span className="badge-dot" />
+              {arbStatus?.running ? "Hunting" : "Idle"}
+            </span>
+          </div>
+
+          {arbOpps.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Pair</th>
+                    <th>Buy At</th>
+                    <th>Sell At</th>
+                    <th>Spread</th>
+                    <th>Est. Profit</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arbOpps.slice(0, 10).map((opp, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{opp.symbol}</td>
+                      <td>
+                        <div className="text-sm">{opp.buy_exchange}</div>
+                        <div>${opp.buy_price < 0.01 ? opp.buy_price.toExponential(3) : opp.buy_price.toFixed(6)}</div>
+                      </td>
+                      <td>
+                        <div className="text-sm">{opp.sell_exchange}</div>
+                        <div>${opp.sell_price < 0.01 ? opp.sell_price.toExponential(3) : opp.sell_price.toFixed(6)}</div>
+                      </td>
+                      <td className="positive">{opp.spread_pct.toFixed(2)}%</td>
+                      <td className={opp.estimated_profit_pct > 0 ? "positive" : "negative"}>
+                        {opp.estimated_profit_pct.toFixed(2)}%
+                      </td>
+                      <td>
+                        <span className={`badge ${opp.is_actionable ? "badge-active" : "badge-stopped"}`}
+                              style={{ fontSize: "0.65rem" }}>
+                          {opp.is_actionable ? "Actionable" : "Watching"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{
+              textAlign: "center", padding: "2rem",
+              color: "var(--text-tertiary)", fontSize: "0.85rem",
+            }}>
+              {arbStatus?.running ? "Scanning real prices for arbitrage opportunities..." : "Start bots to scan for arbitrage"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {Object.entries(botConfig)
+        .filter(([key]) => activeTab === "all" || activeTab === key)
+        .map(([botType, cfg]) => {
+          const bot = bots[botType];
+          const isRunning = (botRunning[botType] as { running?: boolean })?.running ?? false;
+          return (
+            <div className="card mb-md" key={botType}>
+              <div className="card-header">
+                <div className="flex gap-sm" style={{ alignItems: "center" }}>
+                  <div className="asset-icon" style={{ width: 36, height: 36, fontSize: "1rem" }}>
+                    {cfg.icon}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{cfg.label} Bot</div>
+                    <div className="text-sm text-secondary">{cfg.timeframes} · {cfg.interval}</div>
+                  </div>
+                </div>
+                <span className={`badge ${isRunning ? "badge-active" : "badge-stopped"}`}>
+                  <span className="badge-dot" />
+                  {isRunning ? "Hunting" : "Idle"}
+                </span>
+              </div>
+
+              {bot?.trades && bot.trades.length > 0 ? (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Pair</th>
+                        <th>Side</th>
+                        <th>Entry</th>
+                        <th>Size</th>
+                        <th>Stop Loss</th>
+                        <th>Take Profit</th>
+                        <th>Confidence</th>
+                        <th>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bot.trades.map((trade) => (
+                        <tr key={trade.order_id}>
+                          <td style={{ fontWeight: 600 }}>{trade.symbol}</td>
+                          <td>
+                            <span
+                              className={`badge ${trade.side === "buy" ? "badge-active" : "badge-stopped"}`}
+                              style={{ fontSize: "0.7rem" }}
+                            >
+                              {trade.side.toUpperCase()}
+                            </span>
+                          </td>
+                          <td>${trade.entry_price < 0.01 ? trade.entry_price.toExponential(3) : trade.entry_price.toLocaleString()}</td>
+                          <td>${trade.position_usd.toFixed(2)}</td>
+                          <td className="negative">${trade.stop_loss < 0.01 ? trade.stop_loss.toExponential(3) : trade.stop_loss.toLocaleString()}</td>
+                          <td className="positive">
+                            {trade.take_profit
+                              ? `$${trade.take_profit < 0.01 ? trade.take_profit.toExponential(3) : trade.take_profit.toLocaleString()}`
+                              : "—"}
+                          </td>
+                          <td>
+                            <div className="flex gap-sm" style={{ alignItems: "center" }}>
+                              <div className="progress-bar" style={{ width: 50, height: 4 }}>
+                                <div
+                                  className="progress-fill"
+                                  style={{
+                                    width: `${(trade.signal_confidence ?? 0) * 100}%`,
+                                    background: "var(--accent)",
+                                  }}
+                                />
+                              </div>
+                              <span className="text-xs text-secondary">
+                                {((trade.signal_confidence ?? 0) * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          </td>
+                          <td className="text-secondary text-sm">
+                            {new Date(trade.opened_at).toLocaleTimeString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{
+                  textAlign: "center", padding: "2rem",
+                  color: "var(--text-tertiary)", fontSize: "0.85rem",
+                }}>
+                  {isRunning ? "Analyzing real market data..." : "No active positions"}
+                </div>
+              )}
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+export default Bots;

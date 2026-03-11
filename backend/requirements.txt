@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+pandas
+numpy
+ta
+pydantic
+pydantic-settings
+python-dotenv
+sqlalchemy
+ccxt
+aiohttp
