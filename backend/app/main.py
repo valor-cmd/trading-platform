@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router, risk_engine
+from app.core.store import trade_store
 from app.exchange.simulator import paper_exchange
 from app.exchange.live_prices import live_prices
 from app.exchange.registry import exchange_registry
@@ -267,6 +268,11 @@ async def tokens_by_chain(chain: str):
         {"symbol": t.symbol, "name": t.name, "chain": t.chain.value, "tags": t.tags, "contract": t.contract_address}
         for t in tokens
     ]
+
+
+@app.get("/api/portfolio/chart")
+async def portfolio_chart(limit: int = 200):
+    return trade_store.get_portfolio_chart(limit)
 
 
 @app.post("/api/toggle-paper-mode")

@@ -26,13 +26,13 @@ class SwingBot(BaseBot):
         return [s for s in SWING_PAIRS if s in available]
 
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
-        if signal.confidence < 0.1:
-            return False
-
-        if signal.overall_signal == "hold":
+        if signal.confidence < 0.05:
             return False
 
         score = 0
+
+        if signal.overall_signal in ("buy", "strong_buy", "sell", "strong_sell"):
+            score += 1
 
         if signal.ema_trend in ("strong_bullish", "strong_bearish"):
             score += 2
@@ -40,7 +40,7 @@ class SwingBot(BaseBot):
             score += 1
 
         if signal.rsi_signal in ("oversold", "overbought"):
-            score += 1
+            score += 1.5
         elif signal.rsi_signal in ("approaching_oversold", "approaching_overbought"):
             score += 0.5
 

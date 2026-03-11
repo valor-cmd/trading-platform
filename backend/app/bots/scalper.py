@@ -24,13 +24,13 @@ class ScalperBot(BaseBot):
         return [s for s in TOP_PAIRS if s in available]
 
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
-        if signal.confidence < 0.15:
-            return False
-
-        if signal.overall_signal == "hold":
+        if signal.confidence < 0.05:
             return False
 
         score = 0
+
+        if signal.overall_signal in ("buy", "strong_buy", "sell", "strong_sell"):
+            score += 1
 
         if signal.rsi_signal in ("oversold", "overbought"):
             score += 2
@@ -46,6 +46,9 @@ class ScalperBot(BaseBot):
             score += 1
 
         if signal.volume_trend == "high":
+            score += 1
+
+        if signal.ema_trend in ("bullish", "bearish", "strong_bullish", "strong_bearish"):
             score += 1
 
         return score >= 2

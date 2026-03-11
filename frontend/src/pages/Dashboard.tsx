@@ -4,7 +4,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import {
-  getAccountingSummary, getRiskStatus, getBotStatus, getPnl,
+  getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets,
 } from "../services/api";
 
@@ -41,6 +41,7 @@ interface RiskStatus {
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
   if (active && payload?.length) {
+    const ts = label ? new Date(label).toLocaleString() : "";
     return (
       <div style={{
         background: "#1e1e1e",
@@ -49,9 +50,9 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
         padding: "8px 12px",
         fontSize: "0.8rem",
       }}>
-        <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{label}</div>
-        <div style={{ color: payload[0].value >= 0 ? "#00ff88" : "#ff4d6a", fontWeight: 600 }}>
-          ${payload[0].value.toFixed(2)}
+        <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{ts}</div>
+        <div style={{ color: "#00ff88", fontWeight: 600 }}>
+          ${payload[0].value.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
       </div>
     );
@@ -64,7 +65,7 @@ function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [bots, setBots] = useState<Record<string, { active_trades: number }>>({});
-  const [pnlChart, setPnlChart] = useState<{ date: string; pnl_usd: number }[]>([]);
+  const [chartData, setChartData] = useState<{ timestamp: string; balance: number }[]>([]);
   const [timeRange, setTimeRange] = useState("1W");
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -77,12 +78,12 @@ function Dashboard() {
         getAccountingSummary(),
         getRiskStatus(),
         getBotStatus(),
-        getPnl(30),
+        getPortfolioChart(200),
       ]);
       setSummary(s.data);
       setRisk(r.data);
       setBots(b.data);
-      setPnlChart(p.data);
+      setChartData(p.data);
     } catch {
       /* API not connected */
     }
@@ -149,19 +150,19 @@ function Dashboard() {
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={pnlChart}>
+            <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0.2} />
                   <stop offset="100%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <XAxis dataKey="date" hide />
-              <YAxis hide />
+              <XAxis dataKey="timestamp" hide />
+              <YAxis hide domain={["dataMin", "dataMax"]} />
               <Tooltip content={<CustomTooltip />} />
               <Area
                 type="monotone"
-                dataKey="pnl_usd"
+                dataKey="balance"
                 stroke={pnlPositive ? "#00ff88" : "#ff4d6a"}
                 strokeWidth={2}
                 fill="url(#pnlGrad)"

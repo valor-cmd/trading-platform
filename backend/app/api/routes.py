@@ -118,6 +118,7 @@ async def record_deposit(req: DepositRequest):
     allocation = await risk_engine.get_bucket_allocation()
     allocation.total_capital_usd += req.amount_usd
     await risk_engine.save_bucket_allocation(allocation)
+    trade_store.record_snapshot()
     return {"id": dep["id"], "amount_usd": req.amount_usd}
 
 
@@ -135,6 +136,7 @@ async def record_withdrawal(req: WithdrawalRequest):
     allocation = await risk_engine.get_bucket_allocation()
     allocation.total_capital_usd = max(0, allocation.total_capital_usd - req.amount_usd)
     await risk_engine.save_bucket_allocation(allocation)
+    trade_store.record_snapshot()
     return {"id": wd["id"], "amount_usd": req.amount_usd}
 
 

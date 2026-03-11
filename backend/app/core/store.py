@@ -175,6 +175,19 @@ class TradeStore:
             result.append(entry)
         return result
 
+    def record_snapshot(self):
+        self.snapshots.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "balance": round(self._running_balance, 2),
+            "open_trades": len(self.get_open_trades()),
+            "total_trades": len(self.trades),
+        })
+
+    def get_portfolio_chart(self, limit: int = 200) -> list[dict]:
+        if not self.snapshots:
+            return [{"timestamp": datetime.now(timezone.utc).isoformat(), "balance": round(self._running_balance, 2)}]
+        return self.snapshots[-limit:]
+
     def full_accounting(self) -> dict:
         pnl = self.total_pnl()
         deps = self.total_deposits()

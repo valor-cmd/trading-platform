@@ -93,4 +93,6 @@ export const searchTokens = (q = "") => api.get("/tokens/search", { params: { q 
 
 export const getTokensByChain = (chain: string) => api.get(`/tokens/by-chain/${chain}`);
 
+export const getPortfolioChart = (limit = 200) => api.get("/portfolio/chart", { params: { limit } });
+
 export default api;
