@@ -143,7 +143,27 @@ async def record_withdrawal(req: WithdrawalRequest):
 
 @router.get("/accounting/summary")
 async def get_accounting_summary():
-    return trade_store.full_accounting()
+    data = trade_store.full_accounting()
+    usdt = paper_exchange.balances.get("USDT", 0)
+    open_pos_value = 0.0
+    for t in trade_store.get_open_trades():
+        sym = t.get("symbol", "")
+        qty = t.get("quantity", 0)
+        try:
+            ticker = await paper_exchange.fetch_ticker("paper", sym)
+            open_pos_value += ticker["last"] * qty
+        except Exception:
+            open_pos_value += t.get("entry_price", 0) * qty
+    live_total = usdt + open_pos_value
+    deps = data["summary"]["total_deposits_usd"]
+    wds = data["summary"]["total_withdrawals_usd"]
+    net_deps = deps - wds
+    live_pnl = live_total - net_deps if net_deps > 0 else 0
+    data["summary"]["account_value_usd"] = round(live_total, 2)
+    data["summary"]["net_pnl_usd"] = round(live_pnl, 2)
+    data["summary"]["cash_balance_usd"] = round(usdt, 2)
+    data["summary"]["open_position_value_usd"] = round(open_pos_value, 2)
+    return data
 
 
 @router.get("/accounting/pnl")

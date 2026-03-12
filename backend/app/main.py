@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -111,9 +112,25 @@ async def lifespan(app: FastAPI):
 
     async def _snapshot_loop():
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(15)
             try:
-                trade_store.record_snapshot()
+                usdt = paper_exchange.balances.get("USDT", 0)
+                open_pos_value = 0.0
+                for t in trade_store.get_open_trades():
+                    sym = t.get("symbol", "")
+                    qty = t.get("quantity", 0)
+                    try:
+                        ticker = await paper_exchange.fetch_ticker("paper", sym)
+                        open_pos_value += ticker["last"] * qty
+                    except Exception:
+                        open_pos_value += t.get("entry_price", 0) * qty
+                live_balance = usdt + open_pos_value
+                trade_store.snapshots.append({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "balance": round(live_balance, 2),
+                    "open_trades": len(trade_store.get_open_trades()),
+                    "total_trades": len(trade_store.trades),
+                })
             except Exception:
                 pass
 
