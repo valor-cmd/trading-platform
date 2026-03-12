@@ -62,6 +62,10 @@ class ArbitrageEngine:
         if t1.last <= 0 or t2.last <= 0:
             return None
 
+        price_ratio = max(t1.last, t2.last) / min(t1.last, t2.last)
+        if price_ratio > 2.0:
+            return None
+
         if t1.ask > 0 and t2.bid > 0:
             buy_at_1_sell_at_2 = (t2.bid - t1.ask) / t1.ask * 100
         else:
@@ -86,6 +90,9 @@ class ArbitrageEngine:
             sell_price = t1.bid if t1.bid > 0 else t1.last
 
         if spread < self.config.min_spread_pct:
+            return None
+
+        if spread > 10.0:
             return None
 
         buy_adapter = self.registry.get(buy_exchange)
