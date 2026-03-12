@@ -108,7 +108,7 @@ class HederaDEXAdapter(BaseExchangeAdapter):
             url = f"{HEDERA_MIRROR_NODE}/api/v1/tokens?type=FUNGIBLE_COMMON&limit=100&order=desc"
             count = 0
             pages = 0
-            max_pages = 5
+            max_pages = 50
             async with aiohttp.ClientSession() as session:
                 while url and pages < max_pages:
                     async with session.get(
