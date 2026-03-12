@@ -3,11 +3,33 @@ from pydantic import BaseModel
 from typing import Optional
 import json
 
+from datetime import datetime, timezone
+
 from app.core.config import settings
 from app.core.store import store, trade_store
 from app.exchange.simulator import paper_exchange
 from app.risk.engine import RiskEngine
 from app.backtesting.engine import BacktestEngine
+
+
+async def _record_live_snapshot():
+    usdt = paper_exchange.balances.get("USDT", 0)
+    open_pos_value = 0.0
+    for t in trade_store.get_open_trades():
+        sym = t.get("symbol", "")
+        qty = t.get("quantity", 0)
+        try:
+            ticker = await paper_exchange.fetch_ticker("paper", sym)
+            open_pos_value += ticker["last"] * qty
+        except Exception:
+            open_pos_value += t.get("entry_price", 0) * qty
+    live_balance = usdt + open_pos_value
+    trade_store.snapshots.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "balance": round(live_balance, 2),
+        "open_trades": len(trade_store.get_open_trades()),
+        "total_trades": len(trade_store.trades),
+    })
 
 router = APIRouter()
 
@@ -119,7 +141,7 @@ async def record_deposit(req: DepositRequest):
     allocation = await risk_engine.get_bucket_allocation()
     allocation.total_capital_usd += req.amount_usd
     await risk_engine.save_bucket_allocation(allocation)
-    trade_store.record_snapshot()
+    await _record_live_snapshot()
     return {"id": dep["id"], "amount_usd": req.amount_usd}
 
 
@@ -137,7 +159,7 @@ async def record_withdrawal(req: WithdrawalRequest):
     allocation = await risk_engine.get_bucket_allocation()
     allocation.total_capital_usd = max(0, allocation.total_capital_usd - req.amount_usd)
     await risk_engine.save_bucket_allocation(allocation)
-    trade_store.record_snapshot()
+    await _record_live_snapshot()
     return {"id": wd["id"], "amount_usd": req.amount_usd}
 
 

@@ -302,7 +302,23 @@ async def tokens_by_chain(chain: str):
 
 @app.get("/api/portfolio/chart")
 async def portfolio_chart(limit: int = 200):
-    return trade_store.get_portfolio_chart(limit)
+    data = trade_store.get_portfolio_chart(limit)
+    usdt = paper_exchange.balances.get("USDT", 0)
+    open_pos_value = 0.0
+    for t in trade_store.get_open_trades():
+        sym = t.get("symbol", "")
+        qty = t.get("quantity", 0)
+        try:
+            ticker = await paper_exchange.fetch_ticker("paper", sym)
+            open_pos_value += ticker["last"] * qty
+        except Exception:
+            open_pos_value += t.get("entry_price", 0) * qty
+    now_balance = round(usdt + open_pos_value, 2)
+    data.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "balance": now_balance,
+    })
+    return data
 
 
 @app.post("/api/toggle-paper-mode")
