@@ -109,7 +109,19 @@ async def lifespan(app: FastAPI):
     await risk_engine.rebalance_buckets(total_usdt, {})
     logger.info(f"Initialized with ${total_usdt:.2f} USDT")
 
+    async def _snapshot_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                trade_store.record_snapshot()
+            except Exception:
+                pass
+
+    snapshot_task = asyncio.create_task(_snapshot_loop(), name="snapshot_loop")
+
     yield
+
+    snapshot_task.cancel()
 
     logger.info("Shutting down bots...")
     scalper_bot.stop()

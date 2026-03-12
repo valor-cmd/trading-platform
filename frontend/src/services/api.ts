@@ -95,4 +95,6 @@ export const getTokensByChain = (chain: string) => api.get(`/tokens/by-chain/${c
 
 export const getPortfolioChart = (limit = 200) => api.get("/portfolio/chart", { params: { limit } });
 
+export const getLedger = () => api.get("/accounting/ledger");
+
 export default api;

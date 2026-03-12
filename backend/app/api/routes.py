@@ -287,12 +287,23 @@ async def get_risk_status():
 
 @router.post("/risk/rebalance")
 async def rebalance(req: RebalanceRequest):
-    total = req.total_capital
-    if total is None:
-        balance = await paper_exchange.fetch_balance("paper")
-        total = balance["total"].get("USDT", 0)
-    allocation = await risk_engine.rebalance_buckets(total, {})
-    return {"status": "rebalanced", "allocation": allocation.__dict__}
+    try:
+        total = req.total_capital
+        if total is None or total <= 0:
+            balance = await paper_exchange.fetch_balance("paper")
+            total = balance["total"].get("USDT", 0)
+        if total <= 0:
+            total = trade_store.total_deposits() - trade_store.total_withdrawals()
+        allocation = await risk_engine.rebalance_buckets(total, {})
+        return {
+            "status": "rebalanced",
+            "total_capital_usd": round(total, 2),
+            "allocation": allocation.__dict__,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/bots/status")
@@ -305,6 +316,11 @@ async def get_bot_status():
             "trades": [json.loads(v) for v in trades.values()],
         }
     return bots
+
+
+@router.get("/accounting/ledger")
+async def get_ledger():
+    return trade_store.get_ledger()
 
 
 @router.get("/config")

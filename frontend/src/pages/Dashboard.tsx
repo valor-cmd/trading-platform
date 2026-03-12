@@ -75,14 +75,15 @@ function Dashboard() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [rebalanceMsg, setRebalanceMsg] = useState("");
 
   const load = async () => {
     try {
-      const [s, r, b, p, br, ar] = await Promise.all([
+      const [s, r, b, p, , ar] = await Promise.all([
         getAccountingSummary(),
         getRiskStatus(),
         getBotStatus(),
-        getPortfolioChart(200),
+        getPortfolioChart(500),
         getBotsRunning(),
         getArbStatus(),
       ]);
@@ -98,7 +99,7 @@ function Dashboard() {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000);
+    const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -121,8 +122,17 @@ function Dashboard() {
   };
 
   const handleRebalance = async () => {
-    await rebalanceBuckets();
-    await load();
+    try {
+      setRebalanceMsg("Rebalancing...");
+      const res = await rebalanceBuckets();
+      const total = res.data?.total_capital_usd ?? 0;
+      setRebalanceMsg(`Rebalanced: $${total.toFixed(2)}`);
+      await load();
+      setTimeout(() => setRebalanceMsg(""), 3000);
+    } catch {
+      setRebalanceMsg("Rebalance failed");
+      setTimeout(() => setRebalanceMsg(""), 3000);
+    }
   };
 
   const filterChartByRange = (data: { timestamp: string; balance: number }[], range: string) => {
@@ -224,7 +234,7 @@ function Dashboard() {
         </div>
         <div className="action-btn" onClick={handleRebalance} style={{ cursor: "pointer" }}>
           <div className="action-btn-circle">⟳</div>
-          <span className="action-btn-label">Rebalance</span>
+          <span className="action-btn-label">{rebalanceMsg || "Rebalance"}</span>
         </div>
         <div className="action-btn" onClick={() => navigate("/accounting")} style={{ cursor: "pointer" }}>
           <div className="action-btn-circle">⋯</div>

@@ -188,6 +188,91 @@ class TradeStore:
             return [{"timestamp": datetime.now(timezone.utc).isoformat(), "balance": round(self._running_balance, 2)}]
         return self.snapshots[-limit:]
 
+    def get_ledger(self) -> list[dict]:
+        ledger = []
+        for d in self.deposits:
+            ledger.append({
+                "type": "deposit",
+                "timestamp": d.get("timestamp", ""),
+                "description": f"Deposit {d.get('asset', 'USDT')}",
+                "asset": d.get("asset", "USDT"),
+                "amount_usd": d.get("amount_usd", 0),
+                "pnl_usd": None,
+                "fee_usd": 0,
+                "running_balance": None,
+                "side": "credit",
+                "symbol": None,
+                "bot_type": None,
+            })
+        for w in self.withdrawals:
+            ledger.append({
+                "type": "withdrawal",
+                "timestamp": w.get("timestamp", ""),
+                "description": f"Withdrawal {w.get('asset', 'USDT')}",
+                "asset": w.get("asset", "USDT"),
+                "amount_usd": -w.get("amount_usd", 0),
+                "pnl_usd": None,
+                "fee_usd": 0,
+                "running_balance": None,
+                "side": "debit",
+                "symbol": None,
+                "bot_type": None,
+            })
+        for t in self.trades:
+            entry_fee = t.get("entry_fee_usd", 0)
+            ledger.append({
+                "type": "trade_entry",
+                "timestamp": t.get("opened_at", ""),
+                "description": f"{t.get('side', 'buy').upper()} {t.get('symbol', '?')} @ ${t.get('entry_price', 0):.8g}",
+                "asset": t.get("symbol", ""),
+                "amount_usd": -(t.get("entry_price", 0) * t.get("quantity", 0)),
+                "pnl_usd": None,
+                "fee_usd": entry_fee,
+                "running_balance": t.get("balance_at_entry"),
+                "side": t.get("side", "buy"),
+                "symbol": t.get("symbol"),
+                "bot_type": t.get("bot_type"),
+                "trade_id": t.get("id"),
+                "status": t.get("status"),
+                "quantity": t.get("quantity", 0),
+                "price": t.get("entry_price", 0),
+            })
+            if t.get("status") in ("closed", "stopped_out"):
+                exit_fee = t.get("exit_fee_usd", 0)
+                pnl = t.get("pnl_usd", 0)
+                ledger.append({
+                    "type": "trade_exit",
+                    "timestamp": t.get("closed_at", ""),
+                    "description": f"CLOSE {t.get('symbol', '?')} @ ${t.get('exit_price', 0):.8g}",
+                    "asset": t.get("symbol", ""),
+                    "amount_usd": t.get("exit_price", 0) * t.get("quantity", 0),
+                    "pnl_usd": pnl,
+                    "fee_usd": exit_fee,
+                    "running_balance": t.get("balance_at_exit"),
+                    "side": "sell" if t.get("side") == "buy" else "buy",
+                    "symbol": t.get("symbol"),
+                    "bot_type": t.get("bot_type"),
+                    "trade_id": t.get("id"),
+                    "status": t.get("status"),
+                    "quantity": t.get("quantity", 0),
+                    "price": t.get("exit_price", 0),
+                })
+        ledger.sort(key=lambda x: x.get("timestamp") or "")
+        running = 0.0
+        for entry in ledger:
+            if entry["type"] == "deposit":
+                running += entry["amount_usd"]
+                entry["running_balance"] = round(running, 2)
+            elif entry["type"] == "withdrawal":
+                running += entry["amount_usd"]
+                entry["running_balance"] = round(running, 2)
+            elif entry["type"] == "trade_exit" and entry["pnl_usd"] is not None:
+                running += entry["pnl_usd"]
+                entry["running_balance"] = round(running, 2)
+            else:
+                entry["running_balance"] = round(running, 2)
+        return ledger
+
     def full_accounting(self) -> dict:
         pnl = self.total_pnl()
         deps = self.total_deposits()
