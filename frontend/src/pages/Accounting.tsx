@@ -343,10 +343,7 @@ function Accounting() {
                             textAlign: "right", fontFamily: "monospace", fontWeight: 600,
                             color: entry.amount_usd >= 0 ? "var(--green)" : "var(--red)",
                           }}>
-                            {entry.amount_usd >= 0 ? "+" : ""}{entry.amount_usd < 0.01 && entry.amount_usd > -0.01
-                              ? entry.amount_usd.toFixed(6)
-                              : `$${Math.abs(entry.amount_usd).toFixed(2)}`}
-                            {entry.amount_usd < 0 && entry.amount_usd <= -0.01 ? "" : ""}
+                            {entry.amount_usd >= 0 ? "+" : "-"}${Math.abs(entry.amount_usd).toFixed(4)}
                           </td>
                           <td style={{
                             textAlign: "right", fontFamily: "monospace",
@@ -368,7 +365,7 @@ function Accounting() {
                             textAlign: "right", fontFamily: "monospace", fontWeight: 700,
                             fontSize: "0.85rem",
                           }}>
-                            ${entry.running_balance?.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? "—"}
+                            ${entry.running_balance?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "—"}
                           </td>
                         </tr>
                       );
@@ -537,8 +534,8 @@ function Accounting() {
                 { label: "Total Trades", value: String(s?.total_trades ?? 0) },
                 { label: "Open Trades", value: String(s?.open_trades ?? 0) },
                 { label: "Closed Trades", value: String(s?.closed_trades ?? 0) },
-                { label: "Gross P&L", value: `$${s?.total_pnl_usd?.toFixed(2) ?? "0.00"}`, cls: (s?.total_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
-                { label: "Net P&L (after fees)", value: `$${s?.net_pnl_usd?.toFixed(2) ?? "0.00"}`, cls: (s?.net_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
+                { label: "Gross P&L", value: `$${s?.total_pnl_usd?.toFixed(4) ?? "0.0000"}`, cls: (s?.total_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
+                { label: "Net P&L (after fees)", value: `$${s?.net_pnl_usd?.toFixed(4) ?? "0.0000"}`, cls: (s?.net_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
               ].map((row) => (
                 <div className="flex-between" key={row.label} style={{ padding: "0.6rem 0", borderBottom: "1px solid var(--border)" }}>
                   <span className="text-sm text-secondary">{row.label}</span>
