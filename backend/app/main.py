@@ -127,7 +127,7 @@ async def lifespan(app: FastAPI):
                 live_balance = usdt + open_pos_value
                 trade_store.snapshots.append({
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "balance": round(live_balance, 2),
+                    "balance": round(live_balance, 4),
                     "open_trades": len(trade_store.get_open_trades()),
                     "total_trades": len(trade_store.trades),
                 })
@@ -313,7 +313,7 @@ async def portfolio_chart(limit: int = 200):
             open_pos_value += ticker["last"] * qty
         except Exception:
             open_pos_value += t.get("entry_price", 0) * qty
-    now_balance = round(usdt + open_pos_value, 2)
+    now_balance = round(usdt + open_pos_value, 4)
     data.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": now_balance,

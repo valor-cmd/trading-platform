@@ -164,7 +164,7 @@ class TradeStore:
         for t in self.trades:
             total += t.get("entry_fee_usd", 0)
             total += t.get("exit_fee_usd", 0)
-        return round(total, 2)
+        return round(total, 4)
 
     def trades_with_running_balance(self) -> list[dict]:
         result = []
@@ -262,15 +262,15 @@ class TradeStore:
         for entry in ledger:
             if entry["type"] == "deposit":
                 running += entry["amount_usd"]
-                entry["running_balance"] = round(running, 2)
+                entry["running_balance"] = round(running, 4)
             elif entry["type"] == "withdrawal":
                 running += entry["amount_usd"]
-                entry["running_balance"] = round(running, 2)
+                entry["running_balance"] = round(running, 4)
             elif entry["type"] == "trade_exit" and entry["pnl_usd"] is not None:
                 running += entry["pnl_usd"]
-                entry["running_balance"] = round(running, 2)
+                entry["running_balance"] = round(running, 4)
             else:
-                entry["running_balance"] = round(running, 2)
+                entry["running_balance"] = round(running, 4)
         return ledger
 
     def full_accounting(self) -> dict:
@@ -281,18 +281,18 @@ class TradeStore:
         closed_trades = self.get_closed_trades()
         return {
             "summary": {
-                "total_deposits_usd": round(deps, 2),
-                "total_withdrawals_usd": round(wds, 2),
-                "net_deposits_usd": round(deps - wds, 2),
+                "total_deposits_usd": round(deps, 4),
+                "total_withdrawals_usd": round(wds, 4),
+                "net_deposits_usd": round(deps - wds, 4),
                 "total_pnl_usd": pnl["total_pnl_usd"],
                 "total_fees_usd": pnl["total_fees_usd"],
                 "net_pnl_usd": pnl["net_pnl_usd"],
                 "total_trades": len(self.trades),
                 "open_trades": len(open_trades),
                 "closed_trades": len(closed_trades),
-                "account_value_usd": round((deps - wds) + pnl["net_pnl_usd"], 2),
+                "account_value_usd": round((deps - wds) + pnl["net_pnl_usd"], 4),
                 "total_fees_all_time": self.total_fees(),
-                "running_balance": round(self._running_balance, 2),
+                "running_balance": round(self._running_balance, 4),
             },
             "win_rate": self.win_rate(),
             "pnl_by_bot": self.pnl_by_bot(),

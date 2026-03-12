@@ -209,23 +209,23 @@ function Accounting() {
         <div className="card stat-card green">
           <h3>Live Total Balance</h3>
           <div className="value">
-            ${liveBalance?.total_live_balance_usd?.toLocaleString("en", { minimumFractionDigits: 2 }) ?? "0.00"}
+            ${liveBalance?.total_live_balance_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}
           </div>
           <div className="value-sm" style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
-            <span>Cash: ${liveBalance?.cash_balance_usd?.toLocaleString("en", { minimumFractionDigits: 2 }) ?? "0.00"}</span>
-            <span>Positions: ${liveBalance?.open_position_value_usd?.toLocaleString("en", { minimumFractionDigits: 2 }) ?? "0.00"}</span>
+            <span>Cash: ${liveBalance?.cash_balance_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}</span>
+            <span>Positions: ${liveBalance?.open_position_value_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}</span>
           </div>
         </div>
 
         <div className="card stat-card">
           <h3>Net Account Value</h3>
           <div className="value">
-            ${s?.account_value_usd?.toLocaleString("en", { minimumFractionDigits: 2 }) ?? "0.00"}
+            ${s?.account_value_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}
           </div>
           <div className="value-sm" style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
-            <span>Deposited: ${s?.total_deposits_usd?.toFixed(2) ?? "0.00"}</span>
+            <span>Deposited: ${s?.total_deposits_usd?.toFixed(4) ?? "0.0000"}</span>
             <span className={`${(s?.net_pnl_usd ?? 0) >= 0 ? "positive" : "negative"}`}>
-              P&L: {(s?.net_pnl_usd ?? 0) >= 0 ? "+" : ""}${s?.net_pnl_usd?.toFixed(2) ?? "0.00"}
+              P&L: {(s?.net_pnl_usd ?? 0) >= 0 ? "+" : ""}${s?.net_pnl_usd?.toFixed(4) ?? "0.0000"}
             </span>
           </div>
         </div>
@@ -233,11 +233,11 @@ function Accounting() {
         <div className="card stat-card" style={{ borderLeft: "3px solid var(--red)" }}>
           <h3>Fees Paid</h3>
           <div className="value negative">
-            ${fees?.total_fees_usd?.toFixed(2) ?? "0.00"}
+            ${fees?.total_fees_usd?.toFixed(4) ?? "0.0000"}
           </div>
           <div className="value-sm" style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
-            <span>Entry: ${fees?.fee_breakdown?.entry_fees?.toFixed(2) ?? "0.00"}</span>
-            <span>Exit: ${fees?.fee_breakdown?.exit_fees?.toFixed(2) ?? "0.00"}</span>
+            <span>Entry: ${fees?.fee_breakdown?.entry_fees?.toFixed(4) ?? "0.0000"}</span>
+            <span>Exit: ${fees?.fee_breakdown?.exit_fees?.toFixed(4) ?? "0.0000"}</span>
           </div>
         </div>
       </div>

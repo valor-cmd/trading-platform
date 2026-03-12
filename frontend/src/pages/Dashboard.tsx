@@ -191,7 +191,7 @@ function Dashboard() {
           Total Balance
         </div>
         <div style={{ fontSize: "2.5rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
-          ${s?.account_value_usd?.toLocaleString("en", { minimumFractionDigits: 2 }) ?? "0.00"}
+          ${s?.account_value_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}
         </div>
         <div style={{
           fontSize: "0.95rem",
@@ -199,8 +199,8 @@ function Dashboard() {
           color: pnlPositive ? "var(--green)" : "var(--red)",
           marginTop: "0.35rem",
         }}>
-          {pnlPositive ? "+" : ""}${netPnl.toFixed(2)}
-          {s?.net_deposits_usd ? ` (${(netPnl / s.net_deposits_usd * 100).toFixed(1)}%)` : ""}
+          {pnlPositive ? "+" : ""}${netPnl.toFixed(4)}
+          {s?.net_deposits_usd ? ` (${(netPnl / s.net_deposits_usd * 100).toFixed(2)}%)` : ""}
           <span style={{ fontSize: "0.7rem", color: "var(--text-secondary)", marginLeft: "0.5rem" }}>
             {!hasClosedTrades ? "unrealized" : unrealizedPnl !== 0 ? `${realizedPnl >= 0 ? "+" : ""}$${realizedPnl.toFixed(2)} realized` : ""}
           </span>
@@ -209,9 +209,9 @@ function Dashboard() {
           display: "flex", justifyContent: "center", gap: "1.5rem",
           marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--text-secondary)",
         }}>
-          <span>Cash: ${(s?.cash_balance_usd ?? liveBalance?.cash_balance_usd ?? 0).toFixed(2)}</span>
-          <span>Positions: ${(s?.open_position_value_usd ?? liveBalance?.open_position_value_usd ?? 0).toFixed(2)}</span>
-          <span style={{ color: "var(--red)" }}>Fees: -${totalFeesPaid.toFixed(2)}</span>
+          <span>Cash: ${(s?.cash_balance_usd ?? liveBalance?.cash_balance_usd ?? 0).toFixed(4)}</span>
+          <span>Positions: ${(s?.open_position_value_usd ?? liveBalance?.open_position_value_usd ?? 0).toFixed(4)}</span>
+          <span style={{ color: "var(--red)" }}>Fees: -${totalFeesPaid.toFixed(4)}</span>
         </div>
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
@@ -335,13 +335,13 @@ function Dashboard() {
         </div>
         <div className="card stat-card">
           <h3>Total Fees</h3>
-          <div className="value negative">${totalFeesPaid.toFixed(2)}</div>
+          <div className="value negative">${totalFeesPaid.toFixed(4)}</div>
           <div className="value-sm">Deducted from cash</div>
         </div>
         <div className="card stat-card">
           <h3>Unrealized P&L</h3>
           <div className={`value ${unrealizedPnl >= 0 ? "positive" : "negative"}`}>
-            {unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}
+            {unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(4)}
           </div>
           <div className="value-sm">
             {(s?.open_trades ?? 0)} open position{(s?.open_trades ?? 0) !== 1 ? "s" : ""}
