@@ -6,6 +6,7 @@ import {
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
+  getLiveBalance,
 } from "../services/api";
 
 interface Summary {
@@ -21,6 +22,8 @@ interface Summary {
     closed_trades: number;
     account_value_usd: number;
     total_fees_all_time: number;
+    cash_balance_usd: number;
+    open_position_value_usd: number;
   };
   win_rate: {
     total_trades: number;
@@ -28,6 +31,13 @@ interface Summary {
     losing_trades: number;
     win_rate: number;
   };
+}
+
+interface LiveBalance {
+  cash_balance_usd: number;
+  open_position_value_usd: number;
+  total_live_balance_usd: number;
+  open_trade_count: number;
 }
 
 interface RiskStatus {
@@ -69,6 +79,7 @@ function Dashboard() {
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [bots, setBots] = useState<Record<string, { active_trades: number; running?: boolean }>>({});
   const [arbStatus, setArbStatus] = useState<{ running: boolean; trades_executed: number; actionable: number } | null>(null);
+  const [liveBalance, setLiveBalance] = useState<LiveBalance | null>(null);
   const [chartData, setChartData] = useState<{ timestamp: string; balance: number }[]>([]);
   const [timeRange, setTimeRange] = useState("1W");
   const [showDeposit, setShowDeposit] = useState(false);
@@ -79,19 +90,21 @@ function Dashboard() {
 
   const load = async () => {
     try {
-      const [s, r, b, p, , ar] = await Promise.all([
+      const [s, r, b, p, , ar, lb] = await Promise.all([
         getAccountingSummary(),
         getRiskStatus(),
         getBotStatus(),
         getPortfolioChart(500),
         getBotsRunning(),
         getArbStatus(),
+        getLiveBalance(),
       ]);
       setSummary(s.data);
       setRisk(r.data);
       setBots(b.data);
       setChartData(p.data);
       setArbStatus(ar.data);
+      setLiveBalance(lb.data);
     } catch {
       /* API not connected */
     }
@@ -156,7 +169,12 @@ function Dashboard() {
 
   const filteredChart = filterChartByRange(chartData, timeRange);
   const s = summary?.summary;
-  const pnlPositive = (s?.net_pnl_usd ?? 0) >= 0;
+  const netPnl = s?.net_pnl_usd ?? 0;
+  const pnlPositive = netPnl >= 0;
+  const hasClosedTrades = (s?.closed_trades ?? 0) > 0;
+  const realizedPnl = s?.total_pnl_usd ?? 0;
+  const unrealizedPnl = netPnl - realizedPnl;
+  const totalFeesPaid = s?.total_fees_all_time ?? 0;
 
   return (
     <div>
@@ -181,8 +199,19 @@ function Dashboard() {
           color: pnlPositive ? "var(--green)" : "var(--red)",
           marginTop: "0.35rem",
         }}>
-          {pnlPositive ? "+" : ""}${s?.net_pnl_usd?.toFixed(2) ?? "0.00"}
-          {s?.net_deposits_usd ? ` (${((s?.net_pnl_usd ?? 0) / s.net_deposits_usd * 100).toFixed(1)}%)` : ""}
+          {pnlPositive ? "+" : ""}${netPnl.toFixed(2)}
+          {s?.net_deposits_usd ? ` (${(netPnl / s.net_deposits_usd * 100).toFixed(1)}%)` : ""}
+          <span style={{ fontSize: "0.7rem", color: "var(--text-secondary)", marginLeft: "0.5rem" }}>
+            {!hasClosedTrades ? "unrealized" : unrealizedPnl !== 0 ? `${realizedPnl >= 0 ? "+" : ""}$${realizedPnl.toFixed(2)} realized` : ""}
+          </span>
+        </div>
+        <div style={{
+          display: "flex", justifyContent: "center", gap: "1.5rem",
+          marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--text-secondary)",
+        }}>
+          <span>Cash: ${(s?.cash_balance_usd ?? liveBalance?.cash_balance_usd ?? 0).toFixed(2)}</span>
+          <span>Positions: ${(s?.open_position_value_usd ?? liveBalance?.open_position_value_usd ?? 0).toFixed(2)}</span>
+          <span style={{ color: "var(--red)" }}>Fees: -${totalFeesPaid.toFixed(2)}</span>
         </div>
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
@@ -292,6 +321,9 @@ function Dashboard() {
           <div className="value">{summary?.win_rate?.win_rate?.toFixed(1) ?? "0.0"}%</div>
           <div className="value-sm">
             {summary?.win_rate?.winning_trades ?? 0}W / {summary?.win_rate?.losing_trades ?? 0}L
+            {!hasClosedTrades && (s?.open_trades ?? 0) > 0 && (
+              <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>(no closes yet)</span>
+            )}
           </div>
         </div>
         <div className="card stat-card">
@@ -303,19 +335,17 @@ function Dashboard() {
         </div>
         <div className="card stat-card">
           <h3>Total Fees</h3>
-          <div className="value">${s?.total_fees_all_time?.toFixed(2) ?? "0.00"}</div>
-          <div className="value-sm">Paid to exchanges</div>
+          <div className="value negative">${totalFeesPaid.toFixed(2)}</div>
+          <div className="value-sm">Deducted from cash</div>
         </div>
         <div className="card stat-card">
-          <h3>Daily P&L</h3>
-          <div className={`value ${(risk?.daily_pnl_usd ?? 0) >= 0 ? "positive" : "negative"}`}>
-            ${risk?.daily_pnl_usd?.toFixed(2) ?? "0.00"}
+          <h3>Unrealized P&L</h3>
+          <div className={`value ${unrealizedPnl >= 0 ? "positive" : "negative"}`}>
+            {unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}
           </div>
           <div className="value-sm">
-            {risk?.circuit_breaker_active
-              ? <span className="negative">Circuit breaker active</span>
-              : "Within limits"
-            }
+            {(s?.open_trades ?? 0)} open position{(s?.open_trades ?? 0) !== 1 ? "s" : ""}
+            {risk?.circuit_breaker_active && <span className="negative"> | Circuit breaker</span>}
           </div>
         </div>
       </div>
