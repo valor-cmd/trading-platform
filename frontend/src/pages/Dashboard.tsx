@@ -17,7 +17,10 @@ interface Summary {
     total_fees_usd: number;
     net_pnl_usd: number;
     total_trades: number;
+    open_trades: number;
+    closed_trades: number;
     account_value_usd: number;
+    total_fees_all_time: number;
   };
   win_rate: {
     total_trades: number;
@@ -126,6 +129,7 @@ function Dashboard() {
     if (range === "ALL" || data.length === 0) return data;
     const now = new Date();
     const rangeMs: Record<string, number> = {
+      "1M": 1 * 60 * 1000,
       "5M": 5 * 60 * 1000,
       "15M": 15 * 60 * 1000,
       "1H": 60 * 60 * 1000,
@@ -196,7 +200,7 @@ function Dashboard() {
         </div>
 
         <div style={{ display: "flex", justifyContent: "center", gap: "0.25rem", marginTop: "0.75rem" }}>
-          {["5M", "15M", "1H", "4H", "1D", "1W", "ALL"].map((range) => (
+          {["1M", "5M", "15M", "1H", "4H", "1D", "1W", "ALL"].map((range) => (
             <button
               key={range}
               className={`tab ${timeRange === range ? "active" : ""}`}
@@ -283,11 +287,13 @@ function Dashboard() {
         <div className="card stat-card">
           <h3>Total Trades</h3>
           <div className="value">{s?.total_trades ?? 0}</div>
-          <div className="value-sm">All time</div>
+          <div className="value-sm">
+            {s?.open_trades ?? 0} open / {s?.closed_trades ?? 0} closed
+          </div>
         </div>
         <div className="card stat-card">
           <h3>Total Fees</h3>
-          <div className="value">${s?.total_fees_usd?.toFixed(2) ?? "0.00"}</div>
+          <div className="value">${s?.total_fees_all_time?.toFixed(2) ?? "0.00"}</div>
           <div className="value-sm">Paid to exchanges</div>
         </div>
         <div className="card stat-card">

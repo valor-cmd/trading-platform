@@ -192,6 +192,8 @@ class TradeStore:
         pnl = self.total_pnl()
         deps = self.total_deposits()
         wds = self.total_withdrawals()
+        open_trades = self.get_open_trades()
+        closed_trades = self.get_closed_trades()
         return {
             "summary": {
                 "total_deposits_usd": round(deps, 2),
@@ -200,7 +202,9 @@ class TradeStore:
                 "total_pnl_usd": pnl["total_pnl_usd"],
                 "total_fees_usd": pnl["total_fees_usd"],
                 "net_pnl_usd": pnl["net_pnl_usd"],
-                "total_trades": pnl["total_trades"],
+                "total_trades": len(self.trades),
+                "open_trades": len(open_trades),
+                "closed_trades": len(closed_trades),
                 "account_value_usd": round((deps - wds) + pnl["net_pnl_usd"], 2),
                 "total_fees_all_time": self.total_fees(),
                 "running_balance": round(self._running_balance, 2),
