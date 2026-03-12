@@ -26,7 +26,7 @@ async def _record_live_snapshot():
     live_balance = usdt + open_pos_value
     trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "balance": round(live_balance, 4),
+        "balance": round(live_balance, 5),
         "open_trades": len(trade_store.get_open_trades()),
         "total_trades": len(trade_store.trades),
     })
@@ -181,10 +181,10 @@ async def get_accounting_summary():
     wds = data["summary"]["total_withdrawals_usd"]
     net_deps = deps - wds
     live_pnl = live_total - net_deps if net_deps > 0 else 0
-    data["summary"]["account_value_usd"] = round(live_total, 4)
-    data["summary"]["net_pnl_usd"] = round(live_pnl, 4)
-    data["summary"]["cash_balance_usd"] = round(usdt, 4)
-    data["summary"]["open_position_value_usd"] = round(open_pos_value, 4)
+    data["summary"]["account_value_usd"] = round(live_total, 5)
+    data["summary"]["net_pnl_usd"] = round(live_pnl, 5)
+    data["summary"]["cash_balance_usd"] = round(usdt, 5)
+    data["summary"]["open_position_value_usd"] = round(open_pos_value, 5)
     return data
 
 
@@ -276,8 +276,8 @@ async def get_live_balance():
         except Exception:
             open_position_value += t.get("entry_price", 0) * t.get("quantity", 0)
     return {
-        "cash_balance_usd": round(usdt, 4),
-        "open_position_value_usd": round(open_position_value, 4),
+        "cash_balance_usd": round(usdt, 5),
+        "open_position_value_usd": round(open_position_value, 5),
         "total_live_balance_usd": round(usdt + open_position_value, 4),
         "open_trade_count": len(open_trades),
     }

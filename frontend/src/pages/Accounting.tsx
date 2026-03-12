@@ -209,23 +209,23 @@ function Accounting() {
         <div className="card stat-card green">
           <h3>Live Total Balance</h3>
           <div className="value">
-            ${liveBalance?.total_live_balance_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}
+            ${liveBalance?.total_live_balance_usd?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "0.00000"}
           </div>
           <div className="value-sm" style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
-            <span>Cash: ${liveBalance?.cash_balance_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}</span>
-            <span>Positions: ${liveBalance?.open_position_value_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}</span>
+            <span>Cash: ${liveBalance?.cash_balance_usd?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "0.00000"}</span>
+            <span>Positions: ${liveBalance?.open_position_value_usd?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "0.00000"}</span>
           </div>
         </div>
 
         <div className="card stat-card">
           <h3>Net Account Value</h3>
           <div className="value">
-            ${s?.account_value_usd?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "0.0000"}
+            ${s?.account_value_usd?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "0.00000"}
           </div>
           <div className="value-sm" style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
-            <span>Deposited: ${s?.total_deposits_usd?.toFixed(4) ?? "0.0000"}</span>
+            <span>Deposited: ${s?.total_deposits_usd?.toFixed(5) ?? "0.00000"}</span>
             <span className={`${(s?.net_pnl_usd ?? 0) >= 0 ? "positive" : "negative"}`}>
-              P&L: {(s?.net_pnl_usd ?? 0) >= 0 ? "+" : ""}${s?.net_pnl_usd?.toFixed(4) ?? "0.0000"}
+              P&L: {(s?.net_pnl_usd ?? 0) >= 0 ? "+" : ""}${s?.net_pnl_usd?.toFixed(5) ?? "0.00000"}
             </span>
           </div>
         </div>
@@ -233,11 +233,11 @@ function Accounting() {
         <div className="card stat-card" style={{ borderLeft: "3px solid var(--red)" }}>
           <h3>Fees Paid</h3>
           <div className="value negative">
-            ${fees?.total_fees_usd?.toFixed(4) ?? "0.0000"}
+            ${fees?.total_fees_usd?.toFixed(5) ?? "0.00000"}
           </div>
           <div className="value-sm" style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
-            <span>Entry: ${fees?.fee_breakdown?.entry_fees?.toFixed(4) ?? "0.0000"}</span>
-            <span>Exit: ${fees?.fee_breakdown?.exit_fees?.toFixed(4) ?? "0.0000"}</span>
+            <span>Entry: ${fees?.fee_breakdown?.entry_fees?.toFixed(5) ?? "0.00000"}</span>
+            <span>Exit: ${fees?.fee_breakdown?.exit_fees?.toFixed(5) ?? "0.00000"}</span>
           </div>
         </div>
       </div>
@@ -343,7 +343,7 @@ function Accounting() {
                             textAlign: "right", fontFamily: "monospace", fontWeight: 600,
                             color: entry.amount_usd >= 0 ? "var(--green)" : "var(--red)",
                           }}>
-                            {entry.amount_usd >= 0 ? "+" : "-"}${Math.abs(entry.amount_usd).toFixed(4)}
+                            {entry.amount_usd >= 0 ? "+" : "-"}${Math.abs(entry.amount_usd).toFixed(5)}
                           </td>
                           <td style={{
                             textAlign: "right", fontFamily: "monospace",
@@ -352,20 +352,20 @@ function Accounting() {
                               : "var(--text-tertiary)",
                           }}>
                             {entry.pnl_usd !== null
-                              ? `${entry.pnl_usd >= 0 ? "+" : ""}$${entry.pnl_usd.toFixed(4)}`
+                              ? `${entry.pnl_usd >= 0 ? "+" : ""}$${entry.pnl_usd.toFixed(5)}`
                               : "—"}
                           </td>
                           <td style={{
                             textAlign: "right", fontFamily: "monospace", fontSize: "0.78rem",
                             color: entry.fee_usd > 0 ? "var(--red)" : "var(--text-tertiary)",
                           }}>
-                            {entry.fee_usd > 0 ? `-$${entry.fee_usd.toFixed(4)}` : "—"}
+                            {entry.fee_usd > 0 ? `-$${entry.fee_usd.toFixed(5)}` : "—"}
                           </td>
                           <td style={{
                             textAlign: "right", fontFamily: "monospace", fontWeight: 700,
                             fontSize: "0.85rem",
                           }}>
-                            ${entry.running_balance?.toLocaleString("en", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) ?? "—"}
+                            ${entry.running_balance?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "—"}
                           </td>
                         </tr>
                       );
@@ -534,8 +534,8 @@ function Accounting() {
                 { label: "Total Trades", value: String(s?.total_trades ?? 0) },
                 { label: "Open Trades", value: String(s?.open_trades ?? 0) },
                 { label: "Closed Trades", value: String(s?.closed_trades ?? 0) },
-                { label: "Gross P&L", value: `$${s?.total_pnl_usd?.toFixed(4) ?? "0.0000"}`, cls: (s?.total_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
-                { label: "Net P&L (after fees)", value: `$${s?.net_pnl_usd?.toFixed(4) ?? "0.0000"}`, cls: (s?.net_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
+                { label: "Gross P&L", value: `$${s?.total_pnl_usd?.toFixed(5) ?? "0.00000"}`, cls: (s?.total_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
+                { label: "Net P&L (after fees)", value: `$${s?.net_pnl_usd?.toFixed(5) ?? "0.00000"}`, cls: (s?.net_pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
               ].map((row) => (
                 <div className="flex-between" key={row.label} style={{ padding: "0.6rem 0", borderBottom: "1px solid var(--border)" }}>
                   <span className="text-sm text-secondary">{row.label}</span>
