@@ -318,7 +318,46 @@ async def portfolio_chart(limit: int = 200):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": now_balance,
     })
-    return data
+
+    trades = []
+    for t in trade_store.trades:
+        ts = t.get("opened_at", "")
+        if ts:
+            trades.append({
+                "timestamp": ts,
+                "side": t.get("side", "buy"),
+                "symbol": t.get("symbol", ""),
+                "price": t.get("entry_price", 0),
+                "quantity": t.get("quantity", 0),
+                "bot_type": t.get("bot_type", ""),
+                "type": "entry",
+            })
+        if t.get("status") in ("closed", "stopped_out") and t.get("closed_at"):
+            trades.append({
+                "timestamp": t["closed_at"],
+                "side": "sell" if t.get("side") == "buy" else "buy",
+                "symbol": t.get("symbol", ""),
+                "price": t.get("exit_price", 0),
+                "quantity": t.get("quantity", 0),
+                "bot_type": t.get("bot_type", ""),
+                "type": "exit",
+            })
+
+    events = []
+    for d in trade_store.deposits:
+        events.append({
+            "timestamp": d.get("timestamp", ""),
+            "type": "deposit",
+            "amount_usd": d.get("amount_usd", 0),
+        })
+    for w in trade_store.withdrawals:
+        events.append({
+            "timestamp": w.get("timestamp", ""),
+            "type": "withdrawal",
+            "amount_usd": w.get("amount_usd", 0),
+        })
+
+    return {"chart": data, "trades": trades, "events": events}
 
 
 @app.post("/api/toggle-paper-mode")

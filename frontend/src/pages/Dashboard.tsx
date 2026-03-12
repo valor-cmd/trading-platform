@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, Scatter, Cell,
 } from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
@@ -52,9 +53,12 @@ interface RiskStatus {
   };
 }
 
-const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
+const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number; dataKey: string }[]; label?: string }) => {
   if (active && payload?.length) {
     const ts = label ? new Date(label).toLocaleString() : "";
+    const balanceEntry = payload.find((p) => p.dataKey === "balance");
+    const buyEntry = payload.find((p) => p.dataKey === "buy" && p.value != null);
+    const sellEntry = payload.find((p) => p.dataKey === "sell" && p.value != null);
     return (
       <div style={{
         background: "#1e1e1e",
@@ -65,8 +69,13 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
       }}>
         <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{ts}</div>
         <div style={{ color: "#00ff88", fontWeight: 600 }}>
-          ${payload[0].value.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ${balanceEntry?.value?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "—"}
         </div>
+        {buyEntry && <div style={{ color: "#00ff88", fontSize: "0.7rem", marginTop: 2 }}>BUY</div>}
+        {sellEntry && <div style={{ color: "#ff4d6a", fontSize: "0.7rem", marginTop: 2 }}>SELL</div>}
+        {payload.find((p) => p.dataKey === "deposit" && p.value != null) && (
+          <div style={{ color: "#ff9f1c", fontSize: "0.7rem", marginTop: 2 }}>DEPOSIT</div>
+        )}
       </div>
     );
   }
@@ -80,13 +89,14 @@ function Dashboard() {
   const [bots, setBots] = useState<Record<string, { active_trades: number; running?: boolean }>>({});
   const [arbStatus, setArbStatus] = useState<{ running: boolean; trades_executed: number; actionable: number } | null>(null);
   const [liveBalance, setLiveBalance] = useState<LiveBalance | null>(null);
-  const [chartData, setChartData] = useState<{ timestamp: string; balance: number }[]>([]);
+  const [chartData, setChartData] = useState<{ timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[]>([]);
   const [timeRange, setTimeRange] = useState("1W");
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [rebalanceMsg, setRebalanceMsg] = useState("");
+  const [showTradeDots, setShowTradeDots] = useState(true);
 
   const load = async () => {
     try {
@@ -102,9 +112,56 @@ function Dashboard() {
       setSummary(s.data);
       setRisk(r.data);
       setBots(b.data);
-      setChartData(p.data);
       setArbStatus(ar.data);
       setLiveBalance(lb.data);
+
+      const chartPoints: { timestamp: string; balance: number }[] = p.data?.chart ?? p.data ?? [];
+      const tradeEvents: { timestamp: string; side: string }[] = p.data?.trades ?? [];
+      const depositEvents: { timestamp: string; type: string }[] = p.data?.events ?? [];
+
+      const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit" }[] = [];
+      for (const te of tradeEvents) {
+        allMarkers.push({ timestamp: te.timestamp, kind: te.side === "buy" ? "buy" : "sell" });
+      }
+      for (const de of depositEvents) {
+        if (de.type === "deposit") {
+          allMarkers.push({ timestamp: de.timestamp, kind: "deposit" });
+        }
+      }
+
+      const merged: typeof chartData = chartPoints.map((pt) => {
+        const nearest = allMarkers.find((m) =>
+          Math.abs(new Date(m.timestamp).getTime() - new Date(pt.timestamp).getTime()) < 30000
+        );
+        return {
+          ...pt,
+          buy: nearest?.kind === "buy" ? pt.balance : undefined,
+          sell: nearest?.kind === "sell" ? pt.balance : undefined,
+          deposit: nearest?.kind === "deposit" ? pt.balance : undefined,
+        };
+      });
+
+      for (const mk of allMarkers) {
+        const exists = merged.some((m) =>
+          Math.abs(new Date(m.timestamp).getTime() - new Date(mk.timestamp).getTime()) < 30000
+        );
+        if (!exists && chartPoints.length > 0) {
+          const closest = chartPoints.reduce((prev, curr) =>
+            Math.abs(new Date(curr.timestamp).getTime() - new Date(mk.timestamp).getTime()) <
+            Math.abs(new Date(prev.timestamp).getTime() - new Date(mk.timestamp).getTime()) ? curr : prev
+          );
+          merged.push({
+            timestamp: mk.timestamp,
+            balance: closest.balance,
+            buy: mk.kind === "buy" ? closest.balance : undefined,
+            sell: mk.kind === "sell" ? closest.balance : undefined,
+            deposit: mk.kind === "deposit" ? closest.balance : undefined,
+          });
+        }
+      }
+
+      merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      setChartData(merged);
     } catch {
       /* API not connected */
     }
@@ -148,7 +205,7 @@ function Dashboard() {
     }
   };
 
-  const filterChartByRange = (data: { timestamp: string; balance: number }[], range: string) => {
+  const filterChartByRange = (data: typeof chartData, range: string) => {
     if (range === "ALL" || data.length === 0) return data;
     const now = new Date();
     const rangeMs: Record<string, number> = {
@@ -165,6 +222,21 @@ function Dashboard() {
     const cutoff = new Date(now.getTime() - ms);
     const filtered = data.filter((d) => new Date(d.timestamp) >= cutoff);
     return filtered.length > 0 ? filtered : data.slice(-1);
+  };
+
+  const formatXAxisTick = (ts: string) => {
+    const d = new Date(ts);
+    const rangeMs: Record<string, number> = {
+      "1M": 60000, "5M": 300000, "15M": 900000, "1H": 3600000,
+      "4H": 14400000, "1D": 86400000, "1W": 604800000,
+    };
+    const ms = rangeMs[timeRange] ?? 604800000;
+    if (ms <= 3600000) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } else if (ms <= 86400000) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
   const filteredChart = filterChartByRange(chartData, timeRange);
@@ -216,15 +288,33 @@ function Dashboard() {
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={filteredChart}>
+            <ComposedChart data={filteredChart} margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
               <defs>
                 <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0.2} />
                   <stop offset="100%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <XAxis dataKey="timestamp" hide />
-              <YAxis hide domain={["auto", "auto"]} padding={{ top: 10, bottom: 10 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis
+                dataKey="timestamp"
+                tickFormatter={formatXAxisTick}
+                stroke="#555"
+                fontSize={10}
+                tickLine={false}
+                axisLine={{ stroke: "#333" }}
+                minTickGap={40}
+              />
+              <YAxis
+                orientation="right"
+                stroke="#555"
+                fontSize={10}
+                tickLine={false}
+                axisLine={{ stroke: "#333" }}
+                domain={["auto", "auto"]}
+                padding={{ top: 10, bottom: 10 }}
+                tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+              />
               <Tooltip content={<CustomTooltip />} />
               <Area
                 type="monotone"
@@ -234,21 +324,70 @@ function Dashboard() {
                 fill="url(#pnlGrad)"
                 dot={false}
               />
-            </AreaChart>
+              {showTradeDots && (
+                <Scatter dataKey="buy" shape="circle" fill="#00ff88" isAnimationActive={false}>
+                  {filteredChart.map((entry, i) => (
+                    entry.buy != null
+                      ? <Cell key={i} fill="#00ff88" stroke="#000" strokeWidth={1} r={5} />
+                      : <Cell key={i} fill="transparent" stroke="transparent" r={0} />
+                  ))}
+                </Scatter>
+              )}
+              {showTradeDots && (
+                <Scatter dataKey="sell" shape="circle" fill="#ff4d6a" isAnimationActive={false}>
+                  {filteredChart.map((entry, i) => (
+                    entry.sell != null
+                      ? <Cell key={i} fill="#ff4d6a" stroke="#000" strokeWidth={1} r={5} />
+                      : <Cell key={i} fill="transparent" stroke="transparent" r={0} />
+                  ))}
+                </Scatter>
+              )}
+              {showTradeDots && (
+                <Scatter dataKey="deposit" shape="diamond" fill="#ff9f1c" isAnimationActive={false}>
+                  {filteredChart.map((entry, i) => (
+                    entry.deposit != null
+                      ? <Cell key={i} fill="#ff9f1c" stroke="#000" strokeWidth={1} r={6} />
+                      : <Cell key={i} fill="transparent" stroke="transparent" r={0} />
+                  ))}
+                </Scatter>
+              )}
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: "0.25rem", marginTop: "0.75rem" }}>
-          {["1M", "5M", "15M", "1H", "4H", "1D", "1W", "ALL"].map((range) => (
-            <button
-              key={range}
-              className={`tab ${timeRange === range ? "active" : ""}`}
-              onClick={() => setTimeRange(range)}
-              style={{ padding: "0.4rem 0.75rem", fontSize: "0.75rem", borderBottom: "none" }}
-            >
-              {range}
-            </button>
-          ))}
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "0.25rem" }}>
+            {["1M", "5M", "15M", "1H", "4H", "1D", "1W", "ALL"].map((range) => (
+              <button
+                key={range}
+                className={`tab ${timeRange === range ? "active" : ""}`}
+                onClick={() => setTimeRange(range)}
+                style={{ padding: "0.4rem 0.75rem", fontSize: "0.75rem", borderBottom: "none" }}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setShowTradeDots(!showTradeDots)}
+            style={{
+              padding: "0.35rem 0.75rem",
+              fontSize: "0.7rem",
+              background: showTradeDots ? "rgba(255,255,255,0.1)" : "transparent",
+              border: "1px solid #444",
+              borderRadius: 20,
+              color: showTradeDots ? "#fff" : "#666",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.4rem",
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#00ff88", display: "inline-block" }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ff4d6a", display: "inline-block" }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ff9f1c", display: "inline-block" }} />
+            {showTradeDots ? "Dots On" : "Dots Off"}
+          </button>
         </div>
       </div>
 
