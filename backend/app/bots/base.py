@@ -171,22 +171,27 @@ class BaseBot(ABC):
         assessment: RiskAssessment, fee_rate: float, side: str,
     ):
         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
-        price = ticker["last"]
-        amount = assessment.position_size_usd / price
+        amount = assessment.position_size_usd / ticker["last"]
 
-        order = await self.exchange.create_order(exchange_id, symbol, side, amount, price)
+        order = await self.exchange.create_order(exchange_id, symbol, side, amount)
+
+        fill_price = order["price"]
+        actual_fee = order["fee"]
+        actual_fee_rate = order.get("fee_rate", fee_rate)
 
         trade = {
             "order_id": order["id"],
             "symbol": symbol,
             "side": side,
-            "entry_price": price,
+            "entry_price": fill_price,
             "amount": amount,
-            "position_usd": assessment.position_size_usd,
+            "position_usd": fill_price * amount,
             "stop_loss": assessment.stop_loss_price,
             "take_profit": assessment.take_profit_price,
-            "fee_rate": fee_rate,
-            "entry_fee_usd": assessment.position_size_usd * fee_rate,
+            "fee_rate": actual_fee_rate,
+            "entry_fee_usd": actual_fee,
+            "slippage_usd": order.get("slippage_usd", 0),
+            "spread_pct": order.get("spread_pct", 0),
             "opened_at": datetime.now(timezone.utc).isoformat(),
             "reasoning": assessment.reasoning,
             "signal_confidence": signal.confidence,
@@ -199,13 +204,15 @@ class BaseBot(ABC):
             "exchange": exchange_id,
             "symbol": symbol,
             "side": side,
-            "entry_price": price,
+            "entry_price": fill_price,
             "quantity": amount,
             "leverage": 1.0,
             "stop_loss_price": assessment.stop_loss_price,
             "take_profit_price": assessment.take_profit_price,
-            "entry_fee_usd": assessment.position_size_usd * fee_rate,
+            "entry_fee_usd": actual_fee,
             "exit_fee_usd": 0,
+            "slippage_usd": order.get("slippage_usd", 0),
+            "spread_pct": order.get("spread_pct", 0),
             "bucket": self.bot_type.value,
             "reasoning": assessment.reasoning,
             "is_paper": True,
@@ -220,29 +227,33 @@ class BaseBot(ABC):
         trade_store.record_snapshot()
 
     async def close_trade(self, exchange_id: str, trade: dict, status: str = "closed"):
-        ticker = await self.exchange.fetch_ticker(exchange_id, trade["symbol"])
-        exit_price = ticker["last"]
         close_side = "sell" if trade["side"] == "buy" else "buy"
 
-        await self.exchange.create_order(exchange_id, trade["symbol"], close_side, trade["amount"], exit_price)
+        exit_order = await self.exchange.create_order(
+            exchange_id, trade["symbol"], close_side, trade["amount"]
+        )
+
+        exit_price = exit_order["price"]
+        exit_fee = exit_order["fee"]
+        entry_fee = trade.get("entry_fee_usd", 0)
 
         if trade["side"] == "buy":
-            pnl = (exit_price - trade["entry_price"]) * trade["amount"]
+            gross_pnl = (exit_price - trade["entry_price"]) * trade["amount"]
         else:
-            pnl = (trade["entry_price"] - exit_price) * trade["amount"]
+            gross_pnl = (trade["entry_price"] - exit_price) * trade["amount"]
 
-        total_fees = trade.get("entry_fee_usd", 0) + (trade["position_usd"] * trade["fee_rate"])
-        pnl -= total_fees
+        total_fees = entry_fee + exit_fee
+        net_pnl = gross_pnl - total_fees
 
-        await self.risk.update_daily_pnl(pnl)
+        await self.risk.update_daily_pnl(net_pnl)
         await self.risk.release_bucket(self.bot_type.value, trade["position_usd"])
 
         open_trades = trade_store.get_open_trades()
         for ot in open_trades:
             if ot.get("symbol") == trade["symbol"] and ot.get("bot_type") == self.bot_type.value:
                 trade_store.close_trade(
-                    ot["id"], exit_price, round(pnl, 2),
-                    trade["position_usd"] * trade["fee_rate"], status,
+                    ot["id"], exit_price, round(net_pnl, 5),
+                    round(exit_fee, 5), status,
                 )
                 break
 
@@ -253,8 +264,8 @@ class BaseBot(ABC):
         trade_store.record_snapshot()
 
         logger.info(
-            f"{self.bot_type.value} CLOSED {trade['symbol']} @ ${exit_price:.4f} "
-            f"PnL=${pnl:.2f} ({status})"
+            f"{self.bot_type.value} CLOSED {trade['symbol']} @ ${exit_price:.8g} "
+            f"gross=${gross_pnl:.5f} fees=${total_fees:.5f} net=${net_pnl:.5f} ({status})"
         )
 
     async def start(self, exchange_id: str, interval_seconds: int):

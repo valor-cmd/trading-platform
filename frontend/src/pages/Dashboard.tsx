@@ -119,33 +119,44 @@ function Dashboard() {
       const tradeEvents: { timestamp: string; side: string }[] = p.data?.trades ?? [];
       const depositEvents: { timestamp: string; type: string }[] = p.data?.events ?? [];
 
-      const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit" }[] = [];
+      const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit"; used: boolean }[] = [];
       for (const te of tradeEvents) {
-        allMarkers.push({ timestamp: te.timestamp, kind: te.side === "buy" ? "buy" : "sell" });
+        allMarkers.push({ timestamp: te.timestamp, kind: te.side === "buy" ? "buy" : "sell", used: false });
       }
       for (const de of depositEvents) {
         if (de.type === "deposit") {
-          allMarkers.push({ timestamp: de.timestamp, kind: "deposit" });
+          allMarkers.push({ timestamp: de.timestamp, kind: "deposit", used: false });
         }
       }
 
       const merged: typeof chartData = chartPoints.map((pt) => {
-        const nearest = allMarkers.find((m) =>
-          Math.abs(new Date(m.timestamp).getTime() - new Date(pt.timestamp).getTime()) < 30000
-        );
-        return {
-          ...pt,
-          buy: nearest?.kind === "buy" ? pt.balance : undefined,
-          sell: nearest?.kind === "sell" ? pt.balance : undefined,
-          deposit: nearest?.kind === "deposit" ? pt.balance : undefined,
-        };
+        const ptTime = new Date(pt.timestamp).getTime();
+        let bestIdx = -1;
+        let bestDiff = Infinity;
+        for (let i = 0; i < allMarkers.length; i++) {
+          if (allMarkers[i].used) continue;
+          const diff = Math.abs(new Date(allMarkers[i].timestamp).getTime() - ptTime);
+          if (diff < 30000 && diff < bestDiff) {
+            bestDiff = diff;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx >= 0) {
+          allMarkers[bestIdx].used = true;
+          const mk = allMarkers[bestIdx];
+          return {
+            ...pt,
+            buy: mk.kind === "buy" ? pt.balance : undefined,
+            sell: mk.kind === "sell" ? pt.balance : undefined,
+            deposit: mk.kind === "deposit" ? pt.balance : undefined,
+          };
+        }
+        return { ...pt, buy: undefined, sell: undefined, deposit: undefined };
       });
 
       for (const mk of allMarkers) {
-        const exists = merged.some((m) =>
-          Math.abs(new Date(m.timestamp).getTime() - new Date(mk.timestamp).getTime()) < 30000
-        );
-        if (!exists && chartPoints.length > 0) {
+        if (mk.used) continue;
+        if (chartPoints.length > 0) {
           const closest = chartPoints.reduce((prev, curr) =>
             Math.abs(new Date(curr.timestamp).getTime() - new Date(mk.timestamp).getTime()) <
             Math.abs(new Date(prev.timestamp).getTime() - new Date(mk.timestamp).getTime()) ? curr : prev

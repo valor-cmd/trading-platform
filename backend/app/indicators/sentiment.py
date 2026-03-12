@@ -1,6 +1,12 @@
-import random
+import logging
+import time
+import aiohttp
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+
+FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
 
 
 @dataclass
@@ -12,23 +18,36 @@ class SentimentData:
 
 class SentimentAnalyzer:
     def __init__(self):
-        self._cached_value = random.randint(25, 75)
+        self._cached_value: int = 50
+        self._cached_label: str = "Neutral"
+        self._last_fetch: float = 0
+        self._cache_ttl: int = 300
 
     async def get_fear_greed_index(self) -> SentimentData:
-        self._cached_value = max(5, min(95, self._cached_value + random.randint(-3, 3)))
-        if self._cached_value <= 20:
-            label = "Extreme Fear"
-        elif self._cached_value <= 40:
-            label = "Fear"
-        elif self._cached_value <= 60:
-            label = "Neutral"
-        elif self._cached_value <= 80:
-            label = "Greed"
-        else:
-            label = "Extreme Greed"
+        now = time.time()
+        if now - self._last_fetch < self._cache_ttl and self._last_fetch > 0:
+            return SentimentData(
+                fear_greed_value=self._cached_value,
+                fear_greed_label=self._cached_label,
+                timestamp=datetime.now(timezone.utc),
+            )
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(FEAR_GREED_API, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        entry = data.get("data", [{}])[0]
+                        self._cached_value = int(entry.get("value", 50))
+                        self._cached_label = entry.get("value_classification", "Neutral")
+                        self._last_fetch = now
+                        logger.debug(f"Fear & Greed Index: {self._cached_value} ({self._cached_label})")
+        except Exception as e:
+            logger.debug(f"Fear & Greed API fetch failed: {e}")
+
         return SentimentData(
             fear_greed_value=self._cached_value,
-            fear_greed_label=label,
+            fear_greed_label=self._cached_label,
             timestamp=datetime.now(timezone.utc),
         )
 

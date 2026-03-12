@@ -68,25 +68,42 @@ class PaperExchangeManager:
         order_type: str = "market",
     ) -> dict:
         self.order_count += 1
+
+        ex = self._resolve_exchange(symbol)
+        ticker = await live_prices.fetch_ticker(ex, symbol)
+
         if price is None:
-            ex = self._resolve_exchange(symbol)
-            ticker = await live_prices.fetch_ticker(ex, symbol)
             price = ticker["last"]
+
+        bid = ticker.get("bid") or price
+        ask = ticker.get("ask") or price
+        spread = (ask - bid) / price if price > 0 else 0
+
+        if side == "buy":
+            fill_price = ask if ask > 0 else price
+            if spread > 0:
+                fill_price *= 1.0001
+        else:
+            fill_price = bid if bid > 0 else price
+            if spread > 0:
+                fill_price *= 0.9999
 
         base = symbol.split("/")[0]
         quote = symbol.split("/")[1] if "/" in symbol else "USDT"
         fee_rate = await self.get_trading_fee(exchange_id, symbol)
 
         if side == "buy":
-            cost = amount * price
+            cost = amount * fill_price
             fee = cost * fee_rate
             self.balances[quote] = self.balances.get(quote, 0) - cost - fee
             self.balances[base] = self.balances.get(base, 0) + amount
         else:
-            revenue = amount * price
+            revenue = amount * fill_price
             fee = revenue * fee_rate
             self.balances[base] = self.balances.get(base, 0) - amount
             self.balances[quote] = self.balances.get(quote, 0) + revenue - fee
+
+        slippage_usd = abs(fill_price - price) * amount
 
         return {
             "id": f"paper_{self.order_count}_{int(time.time())}",
@@ -94,9 +111,15 @@ class PaperExchangeManager:
             "symbol": symbol,
             "side": side,
             "amount": amount,
-            "price": price,
-            "cost": amount * price,
-            "fee": amount * price * fee_rate,
+            "price": fill_price,
+            "requested_price": price,
+            "bid": bid,
+            "ask": ask,
+            "spread_pct": round(spread * 100, 6),
+            "slippage_usd": round(slippage_usd, 8),
+            "cost": amount * fill_price,
+            "fee": amount * fill_price * fee_rate,
+            "fee_rate": fee_rate,
             "type": order_type,
             "status": "filled",
             "paper": True,
