@@ -43,9 +43,11 @@ class ArbitrageBot:
         if not buy_adapter or not sell_adapter:
             return
 
+        real_balance = self.risk._get_real_usdt_balance()
         allocation = await self.risk.get_bucket_allocation()
-        available = allocation.total_capital_usd * 0.1
-        if available <= 0:
+        cap = min(allocation.total_capital_usd, real_balance) if real_balance > 0 else allocation.total_capital_usd
+        available = cap * 0.05
+        if available < 1.0:
             return
 
         position_usd = min(available, self.arb_engine.config.max_position_usd)

@@ -8,6 +8,7 @@ from typing import Optional
 
 from app.core.store import store, trade_store
 from app.exchange.simulator import PaperExchangeManager
+from app.exchange.registry import exchange_registry
 from app.indicators.technical import TechnicalAnalyzer, SignalResult
 from app.indicators.sentiment import SentimentAnalyzer
 from app.risk.engine import RiskEngine, RiskAssessment
@@ -40,6 +41,16 @@ class BaseBot(ABC):
     @abstractmethod
     def get_symbols(self) -> list[str]:
         pass
+
+    def _get_all_tradable_symbols(self) -> list[str]:
+        symbols = set()
+        for eid, adapter in exchange_registry.get_all().items():
+            if adapter.is_connected():
+                for sym in adapter.get_all_symbols():
+                    symbols.add(sym)
+        cex_symbols = set(self.exchange.get_all_symbols())
+        symbols.update(cex_symbols)
+        return list(symbols)
 
     @abstractmethod
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:

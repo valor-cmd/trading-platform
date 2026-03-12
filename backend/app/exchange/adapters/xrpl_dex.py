@@ -21,7 +21,7 @@ XRPL_RPC_SERVERS = [
 ]
 
 XRPLDATA_API = "https://api.xrpldata.com/api/v1/tokens"
-MIN_TRUSTLINES = 100
+MIN_TRUSTLINES = 50
 
 XRPL_TOKENS = {
     "XRP": TokenInfo(symbol="XRP", name="XRP", chain=Chain.XRPL, is_native=True, decimals=6, coingecko_id="ripple"),

@@ -13,7 +13,11 @@ from app.exchange.live_prices import live_prices
 
 logger = logging.getLogger(__name__)
 
-JUPITER_TOKEN_LIST_URL = "https://tokens.jup.ag/tokens?tags=verified"
+JUPITER_TOKEN_LIST_URLS = [
+    "https://token.jup.ag/all",
+    "https://tokens.jup.ag/tokens?tags=verified",
+    "https://tokens.jup.ag/tokens",
+]
 JUPITER_PRICE_URL = "https://api.jup.ag/price/v2"
 
 WELL_KNOWN_SOLANA_MINTS = {
@@ -111,38 +115,53 @@ class SolanaDEXAdapter(BaseExchangeAdapter):
         return True
 
     async def _load_jupiter_tokens(self):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    JUPITER_TOKEN_LIST_URL,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                    headers={"User-Agent": "TradingPlatform/1.0", "Accept": "application/json"},
-                ) as resp:
-                    if resp.status == 200:
-                        tokens = await resp.json()
-                        count = 0
-                        for t in tokens:
-                            mint = t.get("address", "")
-                            sym = t.get("symbol", "")
-                            name = t.get("name", sym)
-                            decimals = t.get("decimals", 9)
-                            if not mint or not sym or mint in self._mint_to_symbol:
-                                continue
-                            token_info = TokenInfo(
-                                symbol=sym, name=name, chain=Chain.SOLANA,
-                                contract_address=mint, decimals=decimals,
-                                tags=t.get("tags", []) + ["solana", "jupiter-verified"],
-                            )
-                            SOLANA_TOKENS[sym] = token_info
-                            self._mint_to_symbol[mint] = sym
-                            self._symbol_to_mint[sym] = mint
-                            count += 1
-                        logger.info(f"Loaded {count} additional tokens from Jupiter ({len(self._mint_to_symbol)} total)")
-                        self._jupiter_available = True
-                    else:
-                        logger.warning(f"Jupiter token list returned {resp.status}")
-        except Exception as e:
-            logger.warning(f"Failed to load Jupiter token list: {e}")
+        for url in JUPITER_TOKEN_LIST_URLS:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        url,
+                        timeout=aiohttp.ClientTimeout(total=30),
+                        headers={"User-Agent": "TradingPlatform/1.0", "Accept": "application/json"},
+                    ) as resp:
+                        if resp.status == 200:
+                            tokens = await resp.json()
+                            count = 0
+                            seen_symbols = set(self._mint_to_symbol.values())
+                            for t in tokens:
+                                mint = t.get("address", "")
+                                sym = t.get("symbol", "")
+                                name = t.get("name", sym)
+                                decimals = t.get("decimals", 9)
+                                if not mint or not sym or mint in self._mint_to_symbol:
+                                    continue
+                                if len(sym) > 20:
+                                    continue
+                                unique_sym = sym
+                                if unique_sym in seen_symbols:
+                                    unique_sym = f"{sym}.{mint[:6].lower()}"
+                                if unique_sym in seen_symbols:
+                                    continue
+                                seen_symbols.add(unique_sym)
+                                tags = t.get("tags", []) + ["solana"]
+                                if "verified" in str(t.get("tags", [])):
+                                    tags.append("jupiter-verified")
+                                token_info = TokenInfo(
+                                    symbol=unique_sym, name=name, chain=Chain.SOLANA,
+                                    contract_address=mint, decimals=decimals,
+                                    tags=tags,
+                                )
+                                SOLANA_TOKENS[unique_sym] = token_info
+                                self._mint_to_symbol[mint] = unique_sym
+                                self._symbol_to_mint[unique_sym] = mint
+                                count += 1
+                            logger.info(f"Loaded {count} Solana tokens from {url} ({len(self._mint_to_symbol)} total)")
+                            self._jupiter_available = True
+                            return
+                        else:
+                            logger.warning(f"Jupiter {url} returned {resp.status}, trying next...")
+            except Exception as e:
+                logger.warning(f"Jupiter {url} failed: {e}, trying next...")
+        logger.warning("All Jupiter token list URLs failed -- using hardcoded tokens only")
 
     async def _fetch_jupiter_prices(self, mints: list[str]) -> dict[str, float]:
         results = {}

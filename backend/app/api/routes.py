@@ -12,6 +12,7 @@ from app.backtesting.engine import BacktestEngine
 router = APIRouter()
 
 risk_engine = RiskEngine()
+risk_engine.set_paper_exchange(paper_exchange)
 
 
 class ConnectExchangeRequest(BaseModel):

@@ -2,17 +2,6 @@ from app.bots.base import BaseBot
 from app.indicators.technical import SignalResult
 from app.models.trade import BotType
 
-SWING_PAIRS = [
-    "BTC/USDT", "ETH/USDT", "XRP/USDT", "SOL/USDT", "DOGE/USDT",
-    "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT", "MATIC/USDT",
-    "NEAR/USDT", "SUI/USDT", "APT/USDT", "ARB/USDT", "OP/USDT",
-    "ATOM/USDT", "UNI/USDT", "FIL/USDT", "LTC/USDT", "HBAR/USDT",
-    "BONK/USDT", "WIF/USDT", "PEPE/USDT", "SHIB/USDT", "FET/USDT",
-    "RENDER/USDT", "INJ/USDT", "TIA/USDT", "SEI/USDT", "JUP/USDT",
-    "TRUMP/USDT", "WLD/USDT", "STX/USDT", "IMX/USDT", "MANTA/USDT",
-    "PYTH/USDT", "JTO/USDT", "ONDO/USDT", "ENA/USDT", "AAVE/USDT",
-]
-
 
 class SwingBot(BaseBot):
     def __init__(self, exchange_manager, risk_engine, sentiment_analyzer):
@@ -22,8 +11,7 @@ class SwingBot(BaseBot):
         return ["1h", "4h"]
 
     def get_symbols(self) -> list[str]:
-        available = set(self.exchange.get_all_symbols())
-        return [s for s in SWING_PAIRS if s in available]
+        return self._get_all_tradable_symbols()
 
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
         if signal.confidence < 0.05:

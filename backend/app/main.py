@@ -28,6 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelna
 logger = logging.getLogger(__name__)
 
 sentiment_analyzer = SentimentAnalyzer()
+risk_engine.set_paper_exchange(paper_exchange)
 scalper_bot = ScalperBot(paper_exchange, risk_engine, sentiment_analyzer)
 swing_bot = SwingBot(paper_exchange, risk_engine, sentiment_analyzer)
 long_term_bot = LongTermBot(paper_exchange, risk_engine, sentiment_analyzer)

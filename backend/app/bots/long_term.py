@@ -2,13 +2,6 @@ from app.bots.base import BaseBot
 from app.indicators.technical import SignalResult
 from app.models.trade import BotType
 
-LONG_TERM_PAIRS = [
-    "BTC/USDT", "ETH/USDT", "XRP/USDT", "SOL/USDT", "ADA/USDT",
-    "AVAX/USDT", "LINK/USDT", "DOT/USDT", "ATOM/USDT", "NEAR/USDT",
-    "SUI/USDT", "APT/USDT", "HBAR/USDT", "FET/USDT", "RENDER/USDT",
-    "INJ/USDT", "AAVE/USDT", "UNI/USDT", "LTC/USDT", "ONDO/USDT",
-]
-
 
 class LongTermBot(BaseBot):
     def __init__(self, exchange_manager, risk_engine, sentiment_analyzer):
@@ -18,8 +11,7 @@ class LongTermBot(BaseBot):
         return ["1d", "1w"]
 
     def get_symbols(self) -> list[str]:
-        available = set(self.exchange.get_all_symbols())
-        return [s for s in LONG_TERM_PAIRS if s in available]
+        return self._get_all_tradable_symbols()
 
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
         if signal.confidence < 0.05:
