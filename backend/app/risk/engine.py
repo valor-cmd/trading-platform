@@ -65,16 +65,18 @@ class RiskEngine:
         stop_loss_price: float,
         fee_rate: float = 0.001,
     ) -> float:
+        if entry_price <= 0:
+            return 0.0
         risk_amount = capital_available * (risk_per_trade_pct / 100)
         price_diff = abs(entry_price - stop_loss_price)
-        if price_diff == 0:
-            return 0.0
+        if price_diff == 0 or price_diff / entry_price < 0.001:
+            price_diff = entry_price * 0.02
         position_size = risk_amount / (price_diff / entry_price)
         total_fees = position_size * fee_rate * 2
         position_size -= total_fees
         position_size = min(position_size, self.max_position_usd)
         position_size = min(position_size, capital_available)
-        return max(position_size, 0.0)
+        return max(round(position_size, 2), 0.0)
 
     def calculate_stop_loss(
         self, entry_price: float, side: str, atr: float, multiplier: float = 1.5
@@ -151,13 +153,15 @@ class RiskEngine:
             )
 
         risk_pct_map = {"scalper": 1.0, "swing": 1.5, "long_term": 2.0}
-        risk_pct = risk_pct_map.get(bot_type, 1.5) * max(signal_confidence, 0.3)
+        risk_pct = risk_pct_map.get(bot_type, 1.5) * min(max(signal_confidence, 0.3), 1.0)
 
         sl_multiplier_map = {"scalper": 1.0, "swing": 1.5, "long_term": 2.0}
         sl_multiplier = sl_multiplier_map.get(bot_type, 1.5)
 
         stop_loss = self.calculate_stop_loss(entry_price, side, atr, sl_multiplier)
         position_size = self.calculate_position_size(available, risk_pct, entry_price, stop_loss, fee_rate)
+        position_size = min(position_size, available)
+        position_size = min(position_size, allocation.total_capital_usd * 0.10)
 
         if position_size <= 0:
             return RiskAssessment(
