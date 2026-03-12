@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
-  recordDeposit, recordWithdrawal, rebalanceBuckets,
+  recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
 } from "../services/api";
 
 interface Summary {
@@ -64,7 +64,8 @@ function Dashboard() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [risk, setRisk] = useState<RiskStatus | null>(null);
-  const [bots, setBots] = useState<Record<string, { active_trades: number }>>({});
+  const [bots, setBots] = useState<Record<string, { active_trades: number; running?: boolean }>>({});
+  const [arbStatus, setArbStatus] = useState<{ running: boolean; trades_executed: number; actionable: number } | null>(null);
   const [chartData, setChartData] = useState<{ timestamp: string; balance: number }[]>([]);
   const [timeRange, setTimeRange] = useState("1W");
   const [showDeposit, setShowDeposit] = useState(false);
@@ -74,16 +75,19 @@ function Dashboard() {
 
   const load = async () => {
     try {
-      const [s, r, b, p] = await Promise.all([
+      const [s, r, b, p, br, ar] = await Promise.all([
         getAccountingSummary(),
         getRiskStatus(),
         getBotStatus(),
         getPortfolioChart(200),
+        getBotsRunning(),
+        getArbStatus(),
       ]);
       setSummary(s.data);
       setRisk(r.data);
       setBots(b.data);
       setChartData(p.data);
+      setArbStatus(ar.data);
     } catch {
       /* API not connected */
     }
@@ -118,6 +122,25 @@ function Dashboard() {
     await load();
   };
 
+  const filterChartByRange = (data: { timestamp: string; balance: number }[], range: string) => {
+    if (range === "ALL" || data.length === 0) return data;
+    const now = new Date();
+    const rangeMs: Record<string, number> = {
+      "5M": 5 * 60 * 1000,
+      "15M": 15 * 60 * 1000,
+      "1H": 60 * 60 * 1000,
+      "4H": 4 * 60 * 60 * 1000,
+      "1D": 24 * 60 * 60 * 1000,
+      "1W": 7 * 24 * 60 * 60 * 1000,
+    };
+    const ms = rangeMs[range];
+    if (!ms) return data;
+    const cutoff = new Date(now.getTime() - ms);
+    const filtered = data.filter((d) => new Date(d.timestamp) >= cutoff);
+    return filtered.length > 0 ? filtered : data.slice(-1);
+  };
+
+  const filteredChart = filterChartByRange(chartData, timeRange);
   const s = summary?.summary;
   const pnlPositive = (s?.net_pnl_usd ?? 0) >= 0;
 
@@ -150,7 +173,7 @@ function Dashboard() {
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}>
+            <AreaChart data={filteredChart}>
               <defs>
                 <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0.2} />
@@ -158,7 +181,7 @@ function Dashboard() {
                 </linearGradient>
               </defs>
               <XAxis dataKey="timestamp" hide />
-              <YAxis hide domain={["dataMin", "dataMax"]} />
+              <YAxis hide domain={["auto", "auto"]} padding={{ top: 10, bottom: 10 }} />
               <Tooltip content={<CustomTooltip />} />
               <Area
                 type="monotone"
@@ -173,7 +196,7 @@ function Dashboard() {
         </div>
 
         <div style={{ display: "flex", justifyContent: "center", gap: "0.25rem", marginTop: "0.75rem" }}>
-          {["1S", "1M", "5M", "15M", "1D", "1W", "1MO", "3MO", "ALL"].map((range) => (
+          {["5M", "15M", "1H", "4H", "1D", "1W", "ALL"].map((range) => (
             <button
               key={range}
               className={`tab ${timeRange === range ? "active" : ""}`}
@@ -297,7 +320,7 @@ function Dashboard() {
                     {bot.replace("_", " ")}
                   </div>
                   <div className="asset-price">
-                    {bot === "scalper" ? "1m–15m" : bot === "swing" ? "1h–4h" : "1d–1w"}
+                    {bot === "scalper" ? "5m–15m" : bot === "swing" ? "1h–4h" : "1d–1w"}
                   </div>
                 </div>
               </div>
@@ -307,6 +330,23 @@ function Dashboard() {
               </div>
             </div>
           ))}
+          <div className="asset-row">
+            <div className="asset-info">
+              <div className="asset-icon">⇄</div>
+              <div>
+                <div className="asset-name">Arbitrage</div>
+                <div className="asset-price">
+                  {arbStatus?.running ? "Active" : "Inactive"} · Cross-exchange
+                </div>
+              </div>
+            </div>
+            <div className="asset-value">
+              <div className="asset-amount">{arbStatus?.trades_executed ?? 0}</div>
+              <div className="asset-usd">
+                {arbStatus?.actionable ?? 0} opportunities
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="card">
