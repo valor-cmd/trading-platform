@@ -15,5 +15,69 @@ services:
     ports:
       - "6379:6379"
 
+  postgres-hbot:
+    image: postgres:16-alpine
+    container_name: hbot-postgres
+    environment:
+      POSTGRES_USER: hbot
+      POSTGRES_PASSWORD: hummingbot-api
+      POSTGRES_DB: hummingbot_api
+    ports:
+      - "5433:5432"
+    volumes:
+      - hbot_pgdata:/var/lib/postgresql/data
+
+  emqx:
+    image: emqx:5
+    container_name: hummingbot-broker
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "18083:18083"
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hummingbot-api:
+    image: hummingbot/hummingbot-api:latest
+    container_name: hummingbot-api
+    ports:
+      - "8001:8000"
+    environment:
+      USERNAME: admin
+      PASSWORD: admin
+      CONFIG_PASSWORD: admin
+      BROKER_HOST: emqx
+      BROKER_PORT: 1883
+      DATABASE_URL: postgresql+asyncpg://hbot:hummingbot-api@postgres-hbot:5432/hummingbot_api
+      GATEWAY_URL: http://gateway:15888
+    depends_on:
+      emqx:
+        condition: service_healthy
+      postgres-hbot:
+        condition: service_started
+    volumes:
+      - hbot_data:/root/.hummingbot
+      - hbot_conf:/root/conf
+
+  gateway:
+    image: hummingbot/gateway:latest
+    container_name: hummingbot-gateway
+    ports:
+      - "15888:15888"
+    environment:
+      GATEWAY_PASSPHRASE: admin
+      DEV: "true"
+    volumes:
+      - gateway_conf:/home/gateway/conf
+      - gateway_logs:/home/gateway/logs
+
 volumes:
   pgdata:
+  hbot_pgdata:
+  hbot_data:
+  hbot_conf:
+  gateway_conf:
+  gateway_logs:

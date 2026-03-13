@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router, risk_engine, _fetch_prices_batch, _calc_open_position_value
+from app.api.hummingbot_routes import hbot_router
+from app.hummingbot.manager import hbot_manager
 from app.core.store import trade_store
 from app.exchange.simulator import paper_exchange
 from app.exchange.live_prices import live_prices
@@ -131,10 +133,21 @@ async def lifespan(app: FastAPI):
 
     snapshot_task = asyncio.create_task(_snapshot_loop(), name="snapshot_loop")
 
+    try:
+        await hbot_manager.connect()
+        if hbot_manager.is_connected:
+            await hbot_manager.start_health_monitor()
+            logger.info("Hummingbot API connected")
+        else:
+            logger.info("Hummingbot API not available (will connect on demand)")
+    except Exception as e:
+        logger.info(f"Hummingbot API not available: {e}")
+
     yield
 
     snapshot_task.cancel()
 
+    await hbot_manager.disconnect()
     logger.info("Shutting down bots...")
     scalper_bot.stop()
     swing_bot.stop()
@@ -149,7 +162,7 @@ async def lifespan(app: FastAPI):
     logger.info("Trading platform shut down.")
 
 
-app = FastAPI(title="Trading Platform", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="Trading Platform", version="4.0.0", lifespan=lifespan)
 
 import os as _os
 
@@ -170,6 +183,7 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+app.include_router(hbot_router, prefix="/api")
 
 
 @app.post("/api/bots/start/{exchange_id}")
@@ -366,4 +380,5 @@ async def health():
         "exchanges": len(exchange_registry.get_connected()),
         "total_pairs": sum(len(syms) for syms in exchange_registry.get_all_symbols().values()),
         "live_price_sources": len(live_prices.get_exchanges()),
+        "hummingbot_connected": hbot_manager.is_connected,
     }

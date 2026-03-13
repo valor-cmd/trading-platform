@@ -97,4 +97,102 @@ export const getPortfolioChart = (limit = 200) => api.get("/portfolio/chart", { 
 
 export const getLedger = () => api.get("/accounting/ledger");
 
+export const hbotConnect = (data?: { hbot_url?: string; username?: string; password?: string }) =>
+  api.post("/hummingbot/connect", data || {});
+
+export const hbotDisconnect = () => api.post("/hummingbot/disconnect");
+
+export const hbotStatus = () => api.get("/hummingbot/status");
+
+export const hbotSetMode = (paper: boolean) => api.post("/hummingbot/mode", { paper });
+
+export const hbotAddExchange = (data: {
+  exchange: string;
+  api_key: string;
+  api_secret: string;
+  account_name?: string;
+  passphrase?: string;
+}) => api.post("/hummingbot/exchange/add", data);
+
+export const hbotListExchanges = () => api.get("/hummingbot/exchanges");
+
+export const hbotGetPortfolio = (account?: string) =>
+  api.get("/hummingbot/portfolio", { params: account ? { account } : {} });
+
+export const hbotStartStrategy = (data: {
+  strategy_type: string;
+  bot_name?: string;
+  params: Record<string, unknown>;
+}) => api.post("/hummingbot/strategy/start", data);
+
+export const hbotStopStrategy = (botName: string) =>
+  api.post("/hummingbot/strategy/stop", null, { params: { bot_name: botName } });
+
+export const hbotListBots = () => api.get("/hummingbot/bots");
+
+export const hbotBotStatus = (botName: string) => api.get(`/hummingbot/bots/${botName}/status`);
+
+export const hbotPlaceOrder = (data: {
+  connector: string;
+  trading_pair: string;
+  order_type: string;
+  side: string;
+  amount: number;
+  price?: number;
+}) => api.post("/hummingbot/order", data);
+
+export const hbotGetOrders = (connector?: string) =>
+  api.get("/hummingbot/orders", { params: connector ? { connector } : {} });
+
+export const hbotGetTrades = (connector?: string, limit = 100) =>
+  api.get("/hummingbot/trades", { params: { connector, limit } });
+
+export const hbotGetFees = () => api.get("/hummingbot/fees");
+
+export const hbotGetRecentFees = (limit = 50) =>
+  api.get("/hummingbot/fees/recent", { params: { limit } });
+
+export const hbotEstimateFees = (exchange: string, amount: number, price: number, isMaker = false) =>
+  api.get("/hummingbot/fees/estimate", { params: { exchange, amount, price, is_maker: isMaker } });
+
+export const hbotConfigureRpc = (data: {
+  chain: string;
+  network?: string;
+  provider: string;
+  api_key?: string;
+}) => api.post("/hummingbot/rpc/configure", data);
+
+export const hbotGetRpcConfigs = () => api.get("/hummingbot/rpc/configs");
+
+export const hbotGatewayStatus = () => api.get("/hummingbot/gateway/status");
+
+export const hbotGatewayChains = () => api.get("/hummingbot/gateway/chains");
+
+export const hbotGatewayConnectors = () => api.get("/hummingbot/gateway/connectors");
+
+export const hbotSwapQuote = (data: {
+  chain: string;
+  network?: string;
+  connector: string;
+  base_token: string;
+  quote_token: string;
+  amount: string;
+  side?: string;
+  slippage?: number;
+}) => api.post("/hummingbot/gateway/swap/quote", data);
+
+export const hbotSwapExecute = (data: {
+  chain: string;
+  network?: string;
+  connector: string;
+  base_token: string;
+  quote_token: string;
+  amount: string;
+  side?: string;
+  slippage?: number;
+  address?: string;
+}) => api.post("/hummingbot/gateway/swap/execute", data);
+
+export const hbotGetStrategyTypes = () => api.get("/hummingbot/strategy/types");
+
 export default api;

@@ -5,6 +5,7 @@ import Bots from "./pages/Bots";
 import Accounting from "./pages/Accounting";
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
+import Hummingbot from "./pages/Hummingbot";
 import { getHealth } from "./services/api";
 
 function App() {
@@ -41,6 +42,10 @@ function App() {
             <span className="nav-icon">▦</span>
             Backtest
           </NavLink>
+          <NavLink to="/hummingbot">
+            <span className="nav-icon">⬡</span>
+            Hummingbot
+          </NavLink>
           <NavLink to="/settings">
             <span className="nav-icon">⚙</span>
             Settings
@@ -76,6 +81,10 @@ function App() {
             <span className="mobile-nav-icon">▦</span>
             Backtest
           </NavLink>
+          <NavLink to="/hummingbot">
+            <span className="mobile-nav-icon">⬡</span>
+            HBot
+          </NavLink>
           <NavLink to="/settings">
             <span className="mobile-nav-icon">⚙</span>
             Settings
@@ -89,6 +98,7 @@ function App() {
           <Route path="/bots" element={<Bots />} />
           <Route path="/accounting" element={<Accounting />} />
           <Route path="/backtest" element={<Backtest />} />
+          <Route path="/hummingbot" element={<Hummingbot />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
