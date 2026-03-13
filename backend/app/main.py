@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router, risk_engine
+from app.api.routes import router, risk_engine, _fetch_prices_batch, _calc_open_position_value
 from app.core.store import trade_store
 from app.exchange.simulator import paper_exchange
 from app.exchange.live_prices import live_prices
@@ -115,20 +115,15 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(15)
             try:
                 usdt = paper_exchange.balances.get("USDT", 0)
-                open_pos_value = 0.0
-                for t in trade_store.get_open_trades():
-                    sym = t.get("symbol", "")
-                    qty = t.get("quantity", 0)
-                    try:
-                        ticker = await paper_exchange.fetch_ticker("paper", sym)
-                        open_pos_value += ticker["last"] * qty
-                    except Exception:
-                        open_pos_value += t.get("entry_price", 0) * qty
+                open_trades = trade_store.get_open_trades()
+                symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+                prices = await _fetch_prices_batch(symbols)
+                open_pos_value = await _calc_open_position_value(open_trades, prices)
                 live_balance = usdt + open_pos_value
                 trade_store.snapshots.append({
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "balance": round(live_balance, 5),
-                    "open_trades": len(trade_store.get_open_trades()),
+                    "open_trades": len(open_trades),
                     "total_trades": len(trade_store.trades),
                 })
             except Exception:
@@ -304,15 +299,10 @@ async def tokens_by_chain(chain: str):
 async def portfolio_chart(limit: int = 200):
     data = trade_store.get_portfolio_chart(limit)
     usdt = paper_exchange.balances.get("USDT", 0)
-    open_pos_value = 0.0
-    for t in trade_store.get_open_trades():
-        sym = t.get("symbol", "")
-        qty = t.get("quantity", 0)
-        try:
-            ticker = await paper_exchange.fetch_ticker("paper", sym)
-            open_pos_value += ticker["last"] * qty
-        except Exception:
-            open_pos_value += t.get("entry_price", 0) * qty
+    open_trades = trade_store.get_open_trades()
+    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+    prices = await _fetch_prices_batch(symbols)
+    open_pos_value = await _calc_open_position_value(open_trades, prices)
     now_balance = round(usdt + open_pos_value, 5)
     data.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),

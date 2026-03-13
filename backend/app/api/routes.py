@@ -8,26 +8,56 @@ from datetime import datetime, timezone
 from app.core.config import settings
 from app.core.store import store, trade_store
 from app.exchange.simulator import paper_exchange
+from app.exchange.live_prices import live_prices
 from app.risk.engine import RiskEngine
 from app.backtesting.engine import BacktestEngine
 
 
-async def _record_live_snapshot():
-    usdt = paper_exchange.balances.get("USDT", 0)
-    open_pos_value = 0.0
-    for t in trade_store.get_open_trades():
+async def _fetch_prices_batch(symbols: list[str]) -> dict[str, float]:
+    by_exchange: dict[str, list[str]] = {}
+    for sym in symbols:
+        ex = paper_exchange._resolve_exchange(sym)
+        by_exchange.setdefault(ex, []).append(sym)
+
+    prices: dict[str, float] = {}
+    for ex, syms in by_exchange.items():
+        try:
+            batch = await live_prices.fetch_tickers_batch(ex, syms)
+            for sym, ticker in batch.items():
+                if ticker.get("last", 0) > 0:
+                    prices[sym] = ticker["last"]
+        except Exception:
+            pass
+        for sym in syms:
+            if sym not in prices:
+                cache_key = f"{ex}:{sym}"
+                cached = live_prices._ticker_cache.get(cache_key)
+                if cached and cached.get("last", 0) > 0:
+                    prices[sym] = cached["last"]
+    return prices
+
+
+async def _calc_open_position_value(open_trades: list[dict], prices: dict[str, float]) -> float:
+    value = 0.0
+    for t in open_trades:
         sym = t.get("symbol", "")
         qty = t.get("quantity", 0)
-        try:
-            ticker = await paper_exchange.fetch_ticker("paper", sym)
-            open_pos_value += ticker["last"] * qty
-        except Exception:
-            open_pos_value += t.get("entry_price", 0) * qty
+        price = prices.get(sym, t.get("entry_price", 0))
+        value += price * qty
+    return value
+
+
+async def _record_live_snapshot():
+    usdt = paper_exchange.balances.get("USDT", 0)
+    open_trades = trade_store.get_open_trades()
+    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+    prices = await _fetch_prices_batch(symbols)
+    open_pos_value = await _calc_open_position_value(open_trades, prices)
     live_balance = usdt + open_pos_value
     trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": round(live_balance, 5),
-        "open_trades": len(trade_store.get_open_trades()),
+        "open_trades": len(open_trades),
         "total_trades": len(trade_store.trades),
     })
 
@@ -167,15 +197,10 @@ async def record_withdrawal(req: WithdrawalRequest):
 async def get_accounting_summary():
     data = trade_store.full_accounting()
     usdt = paper_exchange.balances.get("USDT", 0)
-    open_pos_value = 0.0
-    for t in trade_store.get_open_trades():
-        sym = t.get("symbol", "")
-        qty = t.get("quantity", 0)
-        try:
-            ticker = await paper_exchange.fetch_ticker("paper", sym)
-            open_pos_value += ticker["last"] * qty
-        except Exception:
-            open_pos_value += t.get("entry_price", 0) * qty
+    open_trades = trade_store.get_open_trades()
+    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+    prices = await _fetch_prices_batch(symbols)
+    open_pos_value = await _calc_open_position_value(open_trades, prices)
     live_total = usdt + open_pos_value
     deps = data["summary"]["total_deposits_usd"]
     wds = data["summary"]["total_withdrawals_usd"]
@@ -220,14 +245,12 @@ async def get_trades_with_balance():
 @router.get("/accounting/active-trades-live")
 async def get_active_trades_live():
     open_trades = trade_store.get_open_trades()
+    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+    prices = await _fetch_prices_batch(symbols)
     result = []
     for t in open_trades:
         symbol = t.get("symbol", "")
-        try:
-            ticker = await paper_exchange.fetch_ticker("paper", symbol)
-            current_price = ticker["last"]
-        except Exception:
-            current_price = t.get("entry_price", 0)
+        current_price = prices.get(symbol, t.get("entry_price", 0))
         entry_price = t.get("entry_price", 0)
         quantity = t.get("quantity", 0)
         side = t.get("side", "buy")
@@ -268,17 +291,13 @@ async def get_live_balance():
     balance = await paper_exchange.fetch_balance("paper")
     usdt = balance["total"].get("USDT", 0)
     open_trades = trade_store.get_open_trades()
-    open_position_value = 0.0
-    for t in open_trades:
-        try:
-            ticker = await paper_exchange.fetch_ticker("paper", t.get("symbol", ""))
-            open_position_value += ticker["last"] * t.get("quantity", 0)
-        except Exception:
-            open_position_value += t.get("entry_price", 0) * t.get("quantity", 0)
+    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+    prices = await _fetch_prices_batch(symbols)
+    open_position_value = await _calc_open_position_value(open_trades, prices)
     return {
         "cash_balance_usd": round(usdt, 5),
         "open_position_value_usd": round(open_position_value, 5),
-        "total_live_balance_usd": round(usdt + open_position_value, 4),
+        "total_live_balance_usd": round(usdt + open_position_value, 5),
         "open_trade_count": len(open_trades),
     }
 
