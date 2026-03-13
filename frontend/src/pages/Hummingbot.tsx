@@ -21,10 +21,12 @@ type Tab = "overview" | "exchanges" | "strategies" | "fees" | "gateway";
 
 interface StatusData {
   connected: boolean;
+  gateway_connected: boolean;
   paper_mode: boolean;
   health?: Record<string, unknown>;
   accounts?: number | Record<string, unknown>;
-  gateway?: Record<string, unknown>;
+  gateway_connectors?: Record<string, unknown>;
+  gateway_chains?: Record<string, unknown>;
   rpc_configs?: Record<string, unknown>;
 }
 
@@ -192,9 +194,13 @@ export default function Hummingbot() {
             }}
           />
           <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>
-            {status?.connected ? "Connected" : "Disconnected"}
+            {status?.connected
+              ? "API Connected"
+              : status?.gateway_connected
+                ? "Gateway Connected"
+                : "Disconnected"}
           </span>
-          {status?.connected && (
+          {(status?.connected || status?.gateway_connected) && (
             <span
               style={{
                 fontSize: 11,
@@ -229,7 +235,7 @@ export default function Hummingbot() {
         <div>
           <div className="card" style={{ padding: 20 }}>
             <h3 style={{ marginBottom: 16 }}>Connection</h3>
-            {!status?.connected ? (
+            {!status?.connected && !status?.gateway_connected ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 400 }}>
                 <input
                   className="input"
@@ -249,30 +255,30 @@ export default function Hummingbot() {
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                 <button className="btn btn-danger" onClick={doDisconnect}>Disconnect</button>
                 <button className="btn" onClick={doToggleMode}>
-                  Switch to {status.paper_mode ? "LIVE" : "PAPER"} Mode
+                  Switch to {status?.paper_mode ? "LIVE" : "PAPER"} Mode
                 </button>
               </div>
             )}
           </div>
 
-          {status?.connected && (
+          {(status?.connected || status?.gateway_connected) && (
             <div className="grid-3" style={{ marginTop: 16 }}>
               <div className="card stat-card">
                 <div className="stat-label">Mode</div>
-                <div className="stat-value" style={{ color: status.paper_mode ? "var(--yellow)" : "var(--green)" }}>
-                  {status.paper_mode ? "Paper" : "Live"}
+                <div className="stat-value" style={{ color: status?.paper_mode ? "var(--yellow)" : "var(--green)" }}>
+                  {status?.paper_mode ? "Paper" : "Live"}
                 </div>
               </div>
               <div className="card stat-card">
-                <div className="stat-label">Accounts</div>
-                <div className="stat-value">{typeof status.accounts === "number" ? status.accounts : "?"}</div>
+                <div className="stat-label">Hummingbot API</div>
+                <div className="stat-value" style={{ fontSize: 14, color: status?.connected ? "var(--green)" : "var(--text-secondary)" }}>
+                  {status?.connected ? "Connected" : "Offline"}
+                </div>
               </div>
               <div className="card stat-card">
                 <div className="stat-label">Gateway</div>
-                <div className="stat-value" style={{ fontSize: 14 }}>
-                  {status.gateway && !("error" in (status.gateway as Record<string, unknown>))
-                    ? "Online"
-                    : "Offline"}
+                <div className="stat-value" style={{ fontSize: 14, color: status?.gateway_connected ? "var(--green)" : "var(--text-secondary)" }}>
+                  {status?.gateway_connected ? "Connected" : "Offline"}
                 </div>
               </div>
             </div>

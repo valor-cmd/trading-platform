@@ -9,3 +9,6 @@ python-dotenv
 sqlalchemy
 ccxt
 aiohttp
+slowapi
+python-jose[cryptography]
+passlib[bcrypt]

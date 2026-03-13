@@ -5,6 +5,7 @@ from typing import Optional
 from datetime import datetime, timezone
 
 from app.hummingbot.client import HummingbotAPIClient
+from app.hummingbot.gateway_client import GatewayClient
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,10 @@ PRIVATE_RPCS = {
 class HummingbotManager:
     def __init__(self):
         self._client: Optional[HummingbotAPIClient] = None
+        self._gateway: Optional[GatewayClient] = None
         self._gateway_url: Optional[str] = None
         self._connected = False
+        self._gateway_connected = False
         self._paper_mode = True
         self._health_task: Optional[asyncio.Task] = None
         self._last_health: Optional[dict] = None
@@ -41,8 +44,16 @@ class HummingbotManager:
         return self._client
 
     @property
+    def gateway(self) -> Optional[GatewayClient]:
+        return self._gateway
+
+    @property
     def is_connected(self) -> bool:
-        return self._connected
+        return self._connected or self._gateway_connected
+
+    @property
+    def is_gateway_connected(self) -> bool:
+        return self._gateway_connected
 
     @property
     def is_paper_mode(self) -> bool:
@@ -55,38 +66,65 @@ class HummingbotManager:
         password: Optional[str] = None,
         gateway_url: Optional[str] = None,
     ):
-        url = hbot_url or os.environ.get("HUMMINGBOT_API_URL", "http://localhost:8001")
+        url = hbot_url or os.environ.get("HUMMINGBOT_API_URL", "")
         user = username or os.environ.get("HUMMINGBOT_USERNAME", "admin")
-        pwd = password or os.environ.get("HUMMINGBOT_PASSWORD", "admin")
-        self._gateway_url = gateway_url or os.environ.get("HUMMINGBOT_GATEWAY_URL", "http://localhost:15888")
+        pwd = password or os.environ.get("HUMMINGBOT_PASSWORD", "")
+        gw_url = gateway_url or os.environ.get("HUMMINGBOT_GATEWAY_URL", "")
+        self._gateway_url = gw_url
 
-        if self._client:
-            await self._client.close()
+        if url:
+            if self._client:
+                await self._client.close()
 
-        self._client = HummingbotAPIClient(
-            base_url=url,
-            username=user,
-            password=pwd,
-        )
+            self._client = HummingbotAPIClient(
+                base_url=url,
+                username=user,
+                password=pwd,
+            )
 
-        health = await self._client.health()
-        if "error" not in health:
-            self._connected = True
-            self._last_health = health
-            logger.info(f"Connected to Hummingbot API at {url}")
+            health = await self._client.health()
+            if "error" not in health:
+                self._connected = True
+                self._last_health = health
+                logger.info(f"Connected to Hummingbot API at {url}")
+            else:
+                self._connected = False
+                logger.info(f"Hummingbot API not available at {url}")
         else:
             self._connected = False
-            logger.warning(f"Hummingbot API not available at {url}: {health.get('error')}")
+            logger.info("No HUMMINGBOT_API_URL configured, skipping Hummingbot API")
 
-        return {"connected": self._connected, "health": health}
+        if gw_url:
+            if self._gateway:
+                await self._gateway.close()
+            self._gateway = GatewayClient(base_url=gw_url)
+            gw_health = await self._gateway.health()
+            if "error" not in gw_health:
+                self._gateway_connected = True
+                logger.info(f"Connected to Gateway at {gw_url}")
+            else:
+                self._gateway_connected = False
+                logger.info(f"Gateway not available at {gw_url}")
+        else:
+            self._gateway_connected = False
+            logger.info("No HUMMINGBOT_GATEWAY_URL configured, skipping Gateway")
+
+        return {
+            "connected": self._connected,
+            "gateway_connected": self._gateway_connected,
+            "health": self._last_health,
+        }
 
     async def disconnect(self):
         if self._health_task:
             self._health_task.cancel()
         if self._client:
             await self._client.close()
+        if self._gateway:
+            await self._gateway.close()
         self._connected = False
-        logger.info("Disconnected from Hummingbot API")
+        self._gateway_connected = False
+        logger.info("Disconnected from Hummingbot services")
 
     async def start_health_monitor(self, interval: int = 30):
         async def _monitor():
@@ -101,8 +139,16 @@ class HummingbotManager:
                             logger.info("Hummingbot API reconnected")
                         elif was_connected and not self._connected:
                             logger.warning("Hummingbot API connection lost")
+
+                    if self._gateway:
+                        gw_health = await self._gateway.health()
+                        was_gw = self._gateway_connected
+                        self._gateway_connected = "error" not in gw_health
+                        if not was_gw and self._gateway_connected:
+                            logger.info("Gateway reconnected")
+                        elif was_gw and not self._gateway_connected:
+                            logger.warning("Gateway connection lost")
                 except Exception as e:
-                    self._connected = False
                     logger.debug(f"Health check failed: {e}")
                 await asyncio.sleep(interval)
 
@@ -170,7 +216,7 @@ class HummingbotManager:
                 "chain": chain,
                 "network": network,
                 "provider": provider,
-                "rpc_url": rpc_url[:40] + "...",
+                "rpc_configured": True,
                 "gateway_update": result,
             }
 
@@ -178,7 +224,7 @@ class HummingbotManager:
             "chain": chain,
             "network": network,
             "provider": provider,
-            "rpc_url": rpc_url[:40] + "...",
+            "rpc_configured": True,
             "note": "Saved locally, will apply when gateway connects",
         }
 
@@ -188,19 +234,33 @@ class HummingbotManager:
             safe[k] = {
                 "provider": v["provider"],
                 "configured_at": v["configured_at"],
-                "url_preview": v["url"][:30] + "...",
             }
         return safe
 
     async def status(self) -> dict:
         result = {
             "connected": self._connected,
+            "gateway_connected": self._gateway_connected,
             "paper_mode": self._paper_mode,
-            "gateway_url": self._gateway_url,
             "rpc_configs": self.get_rpc_configs(),
         }
         if self._last_health:
             result["health"] = self._last_health
+
+        if self._gateway and self._gateway_connected:
+            try:
+                connectors = await self._gateway.get_connectors()
+                if "error" not in connectors:
+                    result["gateway_connectors"] = connectors
+            except Exception:
+                pass
+
+            try:
+                chain_status = await self._gateway.get_chain_status()
+                if "error" not in chain_status:
+                    result["gateway_chains"] = chain_status
+            except Exception:
+                pass
 
         if self._client and self._connected:
             try:
@@ -209,13 +269,6 @@ class HummingbotManager:
                     result["accounts"] = len(accounts)
                 elif isinstance(accounts, dict) and "error" not in accounts:
                     result["accounts"] = accounts
-            except Exception:
-                pass
-
-            try:
-                gw = await self._client.gateway_status()
-                if "error" not in gw:
-                    result["gateway"] = gw
             except Exception:
                 pass
 

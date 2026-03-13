@@ -3,8 +3,8 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/trading_platform"
-    redis_url: str = "redis://localhost:6379/0"
+    database_url: str = ""
+    redis_url: str = ""
 
     coinbase_api_key: str = ""
     coinbase_api_secret: str = ""
@@ -13,6 +13,8 @@ class Settings(BaseSettings):
 
     xaman_api_key: str = ""
     xaman_api_secret: str = ""
+
+    api_secret_key: str = ""
 
     fear_greed_api_url: str = "https://api.alternative.me/fng/"
 

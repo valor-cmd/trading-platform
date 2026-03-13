@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, field_validator
 from typing import Optional
+
+from app.core.security import require_auth
 import json
 
 from datetime import datetime, timezone
@@ -81,6 +83,22 @@ class DepositRequest(BaseModel):
     wallet_address: Optional[str] = None
     tx_hash: Optional[str] = None
 
+    @field_validator("amount_usd")
+    @classmethod
+    def validate_amount_usd(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("amount_usd must be positive")
+        if v > 10_000_000:
+            raise ValueError("amount_usd exceeds maximum")
+        return round(v, 5)
+
+    @field_validator("asset_amount")
+    @classmethod
+    def validate_asset_amount(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("asset_amount must be positive")
+        return v
+
 
 class WithdrawalRequest(BaseModel):
     exchange: str
@@ -89,6 +107,22 @@ class WithdrawalRequest(BaseModel):
     asset_amount: float
     wallet_address: Optional[str] = None
     tx_hash: Optional[str] = None
+
+    @field_validator("amount_usd")
+    @classmethod
+    def validate_amount_usd(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("amount_usd must be positive")
+        if v > 10_000_000:
+            raise ValueError("amount_usd exceeds maximum")
+        return round(v, 5)
+
+    @field_validator("asset_amount")
+    @classmethod
+    def validate_asset_amount(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("asset_amount must be positive")
+        return v
 
 
 class TrackWalletRequest(BaseModel):
@@ -111,7 +145,7 @@ class RebalanceRequest(BaseModel):
 
 
 @router.post("/exchange/connect")
-async def connect_exchange(req: ConnectExchangeRequest):
+async def connect_exchange(req: ConnectExchangeRequest, _auth=Depends(require_auth)):
     paper_exchange.connect(req.exchange_id)
     return {"status": "connected", "exchange": req.exchange_id}
 
@@ -158,7 +192,7 @@ async def get_analysis(exchange_id: str, symbol: str, timeframe: str = "1h"):
 
 
 @router.post("/accounting/deposit")
-async def record_deposit(req: DepositRequest):
+async def record_deposit(req: DepositRequest, _auth=Depends(require_auth)):
     dep = trade_store.add_deposit({
         "exchange": req.exchange,
         "amount_usd": req.amount_usd,
@@ -176,7 +210,7 @@ async def record_deposit(req: DepositRequest):
 
 
 @router.post("/accounting/withdrawal")
-async def record_withdrawal(req: WithdrawalRequest):
+async def record_withdrawal(req: WithdrawalRequest, _auth=Depends(require_auth)):
     wd = trade_store.add_withdrawal({
         "exchange": req.exchange,
         "amount_usd": req.amount_usd,
@@ -303,7 +337,7 @@ async def get_live_balance():
 
 
 @router.post("/backtest")
-async def run_backtest(req: BacktestRequest):
+async def run_backtest(req: BacktestRequest, _auth=Depends(require_auth)):
     df = await paper_exchange.fetch_ohlcv(req.exchange_id, req.symbol, req.timeframe, limit=req.limit)
     if len(df) < 201:
         raise HTTPException(status_code=400, detail="Not enough candle data for backtest")
@@ -347,7 +381,7 @@ async def get_risk_status():
 
 
 @router.post("/risk/rebalance")
-async def rebalance(req: RebalanceRequest):
+async def rebalance(req: RebalanceRequest, _auth=Depends(require_auth)):
     try:
         total = req.total_capital
         if total is None or total <= 0:

@@ -4,6 +4,15 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/api",
 });
 
+const API_TOKEN = import.meta.env.VITE_API_TOKEN || "";
+
+api.interceptors.request.use((config) => {
+  if (API_TOKEN) {
+    config.headers.Authorization = `Bearer ${API_TOKEN}`;
+  }
+  return config;
+});
+
 export const connectExchange = (exchangeId: string, apiKey: string, apiSecret: string) =>
   api.post("/exchange/connect", { exchange_id: exchangeId, api_key: apiKey, api_secret: apiSecret });
 

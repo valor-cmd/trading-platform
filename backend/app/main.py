@@ -3,8 +3,10 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.security import require_auth, RateLimitMiddleware
 
 from app.api.routes import router, risk_engine, _fetch_prices_batch, _calc_open_position_value
 from app.api.hummingbot_routes import hbot_router
@@ -182,12 +184,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
+
 app.include_router(router, prefix="/api")
 app.include_router(hbot_router, prefix="/api")
 
 
 @app.post("/api/bots/start/{exchange_id}")
-async def start_bots(exchange_id: str):
+async def start_bots(exchange_id: str, _auth=Depends(require_auth)):
     if not paper_exchange.is_connected(exchange_id):
         paper_exchange.connect(exchange_id)
 
@@ -216,7 +220,7 @@ async def start_bots(exchange_id: str):
 
 
 @app.post("/api/bots/stop")
-async def stop_bots():
+async def stop_bots(_auth=Depends(require_auth)):
     scalper_bot.stop()
     swing_bot.stop()
     long_term_bot.stop()
@@ -365,7 +369,7 @@ async def portfolio_chart(limit: int = 200):
 
 
 @app.post("/api/toggle-paper-mode")
-async def toggle_paper_mode(body: dict):
+async def toggle_paper_mode(body: dict, _auth=Depends(require_auth)):
     new_mode = body.get("paper_trading", True)
     settings.paper_trading = new_mode
     logger.info(f"Trading mode switched to: {'PAPER' if new_mode else 'LIVE'}")
@@ -381,4 +385,6 @@ async def health():
         "total_pairs": sum(len(syms) for syms in exchange_registry.get_all_symbols().values()),
         "live_price_sources": len(live_prices.get_exchanges()),
         "hummingbot_connected": hbot_manager.is_connected,
+        "gateway_connected": hbot_manager.is_gateway_connected,
+        "auth_enabled": bool(_os.environ.get("API_SECRET_KEY", "")),
     }

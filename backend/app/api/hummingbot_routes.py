@@ -1,8 +1,10 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+
+from app.core.security import require_auth, sanitize_key_for_log
 
 from app.hummingbot.manager import hbot_manager
 from app.hummingbot.strategies import (
@@ -76,7 +78,7 @@ class SwapRequest(BaseModel):
 
 
 @hbot_router.post("/connect")
-async def connect_hummingbot(req: ConnectRequest):
+async def connect_hummingbot(req: ConnectRequest, _auth=Depends(require_auth)):
     result = await hbot_manager.connect(
         hbot_url=req.hbot_url,
         username=req.username,
@@ -90,7 +92,7 @@ async def connect_hummingbot(req: ConnectRequest):
 
 
 @hbot_router.post("/disconnect")
-async def disconnect_hummingbot():
+async def disconnect_hummingbot(_auth=Depends(require_auth)):
     await hbot_manager.disconnect()
     return {"status": "disconnected"}
 
@@ -101,13 +103,13 @@ async def hummingbot_status():
 
 
 @hbot_router.post("/mode")
-async def set_mode(req: ModeRequest):
+async def set_mode(req: ModeRequest, _auth=Depends(require_auth)):
     hbot_manager.set_mode(req.paper)
     return {"paper_mode": hbot_manager.is_paper_mode}
 
 
 @hbot_router.post("/exchange/add")
-async def add_exchange(req: AddExchangeRequest):
+async def add_exchange(req: AddExchangeRequest, _auth=Depends(require_auth)):
     extra = {}
     if req.passphrase:
         extra["passphrase"] = req.passphrase
@@ -142,7 +144,7 @@ async def get_portfolio(account: Optional[str] = None):
 
 
 @hbot_router.post("/strategy/start")
-async def start_strategy(req: StrategyRequest):
+async def start_strategy(req: StrategyRequest, _auth=Depends(require_auth)):
     if not hbot_manager.client or not hbot_manager.is_connected:
         raise HTTPException(status_code=503, detail="Hummingbot API not connected")
 
@@ -181,7 +183,7 @@ async def start_strategy(req: StrategyRequest):
 
 
 @hbot_router.post("/strategy/stop")
-async def stop_strategy(bot_name: str):
+async def stop_strategy(bot_name: str, _auth=Depends(require_auth)):
     if not hbot_manager.client or not hbot_manager.is_connected:
         raise HTTPException(status_code=503, detail="Hummingbot API not connected")
     result = await hbot_manager.client.stop_bot(bot_name)
@@ -210,7 +212,7 @@ async def bot_history(bot_name: str):
 
 
 @hbot_router.post("/order")
-async def place_order(req: OrderRequest):
+async def place_order(req: OrderRequest, _auth=Depends(require_auth)):
     if not hbot_manager.client or not hbot_manager.is_connected:
         raise HTTPException(status_code=503, detail="Hummingbot API not connected")
 
@@ -243,7 +245,7 @@ async def place_order(req: OrderRequest):
 
 
 @hbot_router.delete("/order/{order_id}")
-async def cancel_order(order_id: str, connector: str, trading_pair: str):
+async def cancel_order(order_id: str, connector: str, trading_pair: str, _auth=Depends(require_auth)):
     if not hbot_manager.client or not hbot_manager.is_connected:
         raise HTTPException(status_code=503, detail="Hummingbot API not connected")
     return await hbot_manager.client.cancel_order(connector, trading_pair, order_id)
@@ -314,7 +316,7 @@ async def estimate_fees(
 
 
 @hbot_router.post("/rpc/configure")
-async def configure_rpc(req: RPCConfigRequest):
+async def configure_rpc(req: RPCConfigRequest, _auth=Depends(require_auth)):
     result = await hbot_manager.configure_private_rpc(
         chain=req.chain,
         network=req.network,
@@ -333,65 +335,98 @@ async def get_rpc_configs():
 
 @hbot_router.get("/gateway/status")
 async def gateway_status():
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        return {"connected": False}
-    return await hbot_manager.client.gateway_status()
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        return await hbot_manager.gateway.health()
+    if hbot_manager.client and hbot_manager.is_connected:
+        return await hbot_manager.client.gateway_status()
+    return {"connected": False}
 
 
 @hbot_router.get("/gateway/chains")
 async def gateway_chains():
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        return {"connected": False, "chains": []}
-    return await hbot_manager.client.gateway_get_chains()
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        return await hbot_manager.gateway.get_chain_status()
+    if hbot_manager.client and hbot_manager.is_connected:
+        return await hbot_manager.client.gateway_get_chains()
+    return {"connected": False, "chains": []}
 
 
 @hbot_router.get("/gateway/connectors")
 async def gateway_connectors():
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        return {"connected": False, "connectors": []}
-    return await hbot_manager.client.gateway_get_connectors()
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        return await hbot_manager.gateway.get_connectors()
+    if hbot_manager.client and hbot_manager.is_connected:
+        return await hbot_manager.client.gateway_get_connectors()
+    return {"connected": False, "connectors": []}
 
 
 @hbot_router.get("/gateway/tokens/{chain}/{network}")
 async def gateway_tokens(chain: str, network: str):
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        return {"connected": False, "tokens": []}
-    return await hbot_manager.client.gateway_get_tokens(chain, network)
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        return await hbot_manager.gateway.get_tokens(chain, network)
+    if hbot_manager.client and hbot_manager.is_connected:
+        return await hbot_manager.client.gateway_get_tokens(chain, network)
+    return {"connected": False, "tokens": []}
 
 
 @hbot_router.post("/gateway/swap/quote")
-async def gateway_swap_quote(req: SwapRequest):
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        raise HTTPException(status_code=503, detail="Hummingbot API not connected")
-    return await hbot_manager.client.gateway_quote_swap(
-        chain=req.chain,
-        network=req.network,
-        connector=req.connector,
-        base_token=req.base_token,
-        quote_token=req.quote_token,
-        amount=req.amount,
-        side=req.side,
-        slippage=req.slippage,
-    )
+async def gateway_swap_quote(req: SwapRequest, _auth=Depends(require_auth)):
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        return await hbot_manager.gateway.quote_swap(
+            chain=req.chain,
+            connector=req.connector,
+            base_token=req.base_token,
+            quote_token=req.quote_token,
+            amount=req.amount,
+            side=req.side,
+            network=req.network,
+            slippage=req.slippage,
+        )
+    if hbot_manager.client and hbot_manager.is_connected:
+        return await hbot_manager.client.gateway_quote_swap(
+            chain=req.chain,
+            network=req.network,
+            connector=req.connector,
+            base_token=req.base_token,
+            quote_token=req.quote_token,
+            amount=req.amount,
+            side=req.side,
+            slippage=req.slippage,
+        )
+    raise HTTPException(status_code=503, detail="Gateway not connected")
 
 
 @hbot_router.post("/gateway/swap/execute")
-async def gateway_swap_execute(req: SwapRequest):
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        raise HTTPException(status_code=503, detail="Hummingbot API not connected")
-    result = await hbot_manager.client.gateway_execute_swap(
-        chain=req.chain,
-        network=req.network,
-        connector=req.connector,
-        base_token=req.base_token,
-        quote_token=req.quote_token,
-        amount=req.amount,
-        side=req.side,
-        slippage=req.slippage,
-        address=req.address,
-    )
+async def gateway_swap_execute(req: SwapRequest, _auth=Depends(require_auth)):
+    result = None
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        result = await hbot_manager.gateway.execute_swap(
+            chain=req.chain,
+            connector=req.connector,
+            base_token=req.base_token,
+            quote_token=req.quote_token,
+            amount=req.amount,
+            side=req.side,
+            network=req.network,
+            slippage=req.slippage,
+            address=req.address,
+        )
+    elif hbot_manager.client and hbot_manager.is_connected:
+        result = await hbot_manager.client.gateway_execute_swap(
+            chain=req.chain,
+            network=req.network,
+            connector=req.connector,
+            base_token=req.base_token,
+            quote_token=req.quote_token,
+            amount=req.amount,
+            side=req.side,
+            slippage=req.slippage,
+            address=req.address,
+        )
+    else:
+        raise HTTPException(status_code=503, detail="Gateway not connected")
 
-    if "error" not in result:
+    if result and "error" not in result:
         gas = fee_tracker.estimate_dex_gas(req.chain, req.connector)
         fee_tracker.record_trade_fee(
             exchange=f"gateway:{req.connector}",
@@ -410,13 +445,15 @@ async def gateway_swap_execute(req: SwapRequest):
 
 @hbot_router.get("/gateway/swap/status")
 async def gateway_swap_status(chain: str, network: str, tx_hash: str):
-    if not hbot_manager.client or not hbot_manager.is_connected:
-        raise HTTPException(status_code=503, detail="Hummingbot API not connected")
-    return await hbot_manager.client.gateway_swap_status(chain, network, tx_hash)
+    if hbot_manager.gateway and hbot_manager.is_gateway_connected:
+        return await hbot_manager.gateway.get_swap_status(chain, tx_hash, network)
+    if hbot_manager.client and hbot_manager.is_connected:
+        return await hbot_manager.client.gateway_swap_status(chain, network, tx_hash)
+    raise HTTPException(status_code=503, detail="Gateway not connected")
 
 
 @hbot_router.post("/backtest")
-async def run_backtest(config: dict):
+async def run_backtest(config: dict, _auth=Depends(require_auth)):
     if not hbot_manager.client or not hbot_manager.is_connected:
         raise HTTPException(status_code=503, detail="Hummingbot API not connected")
     return await hbot_manager.client.run_backtest(config)
