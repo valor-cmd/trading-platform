@@ -232,9 +232,14 @@ function Bots() {
   }, []);
 
   const handleStart = async () => {
-    await startBots("paper");
-    setRunning(true);
-    setTimeout(load, 2000);
+    try {
+      await startBots("paper");
+      setRunning(true);
+      setTimeout(load, 2000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      alert(`Failed to start bots: ${msg}`);
+    }
   };
 
   const handleStop = async () => {
