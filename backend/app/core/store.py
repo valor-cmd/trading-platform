@@ -312,15 +312,13 @@ class TradeStore:
         for entry in ledger:
             if entry["type"] == "deposit":
                 running += entry["amount_usd"]
-                entry["running_balance"] = round(running, 5)
             elif entry["type"] == "withdrawal":
                 running += entry["amount_usd"]
-                entry["running_balance"] = round(running, 5)
-            elif entry["type"] == "trade_exit" and entry["pnl_usd"] is not None:
-                running += entry["pnl_usd"]
-                entry["running_balance"] = round(running, 5)
-            else:
-                entry["running_balance"] = round(running, 5)
+            elif entry["type"] == "trade_entry":
+                running += entry["amount_usd"] - entry.get("fee_usd", 0)
+            elif entry["type"] == "trade_exit":
+                running += entry["amount_usd"] - entry.get("fee_usd", 0)
+            entry["running_balance"] = round(running, 5)
         return ledger
 
     def full_accounting(self) -> dict:
