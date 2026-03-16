@@ -246,11 +246,20 @@ async def record_deposit(req: DepositRequest, _auth=Depends(require_auth)):
     })
     paper_exchange.balances["USDT"] = paper_exchange.balances.get("USDT", 0) + req.amount_usd
     paper_exchange._save()
-    allocation = await risk_engine.get_bucket_allocation()
-    allocation.total_capital_usd += req.amount_usd
-    await risk_engine.save_bucket_allocation(allocation)
-    await _record_live_snapshot()
-    return {"id": dep["id"], "amount_usd": req.amount_usd}
+    new_total = paper_exchange.balances.get("USDT", 0)
+    await risk_engine.rebalance_buckets(new_total, {})
+    trade_store.snapshots.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "balance": round(new_total, 5),
+        "open_trades": len(trade_store.get_open_trades()),
+        "total_trades": len(trade_store.trades),
+    })
+    trade_store._save()
+    return {
+        "id": dep["id"],
+        "amount_usd": req.amount_usd,
+        "new_balance": round(new_total, 5),
+    }
 
 
 @router.post("/accounting/withdrawal")
@@ -265,11 +274,20 @@ async def record_withdrawal(req: WithdrawalRequest, _auth=Depends(require_auth))
     })
     paper_exchange.balances["USDT"] = max(0, paper_exchange.balances.get("USDT", 0) - req.amount_usd)
     paper_exchange._save()
-    allocation = await risk_engine.get_bucket_allocation()
-    allocation.total_capital_usd = max(0, allocation.total_capital_usd - req.amount_usd)
-    await risk_engine.save_bucket_allocation(allocation)
-    await _record_live_snapshot()
-    return {"id": wd["id"], "amount_usd": req.amount_usd}
+    new_total = paper_exchange.balances.get("USDT", 0)
+    await risk_engine.rebalance_buckets(new_total, {})
+    trade_store.snapshots.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "balance": round(new_total, 5),
+        "open_trades": len(trade_store.get_open_trades()),
+        "total_trades": len(trade_store.trades),
+    })
+    trade_store._save()
+    return {
+        "id": wd["id"],
+        "amount_usd": req.amount_usd,
+        "new_balance": round(new_total, 5),
+    }
 
 
 @router.get("/accounting/summary")

@@ -139,6 +139,22 @@ async def lifespan(app: FastAPI):
 
     snapshot_task = asyncio.create_task(_snapshot_loop(), name="snapshot_loop")
 
+    async def _rebalance_loop():
+        while True:
+            await asyncio.sleep(300)
+            try:
+                usdt = paper_exchange.balances.get("USDT", 0)
+                if usdt > 0:
+                    alloc = await risk_engine.rebalance_buckets(usdt, {})
+                    logger.info(
+                        f"Auto-rebalance: scalper={alloc.scalper_pct}% swing={alloc.swing_pct}% "
+                        f"long_term={alloc.long_term_pct}% arb={alloc.arbitrage_pct}%"
+                    )
+            except Exception as e:
+                logger.debug(f"Auto-rebalance error: {e}")
+
+    rebalance_task = asyncio.create_task(_rebalance_loop(), name="rebalance_loop")
+
     try:
         await hbot_manager.connect()
         if hbot_manager.is_connected:
@@ -152,6 +168,7 @@ async def lifespan(app: FastAPI):
     yield
 
     snapshot_task.cancel()
+    rebalance_task.cancel()
 
     await hbot_manager.disconnect()
     logger.info("Shutting down bots...")

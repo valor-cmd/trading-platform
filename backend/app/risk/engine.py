@@ -24,11 +24,13 @@ class RiskAssessment:
 @dataclass
 class BucketAllocation:
     scalper_pct: float = 20.0
-    swing_pct: float = 40.0
-    long_term_pct: float = 40.0
+    swing_pct: float = 30.0
+    long_term_pct: float = 30.0
+    arbitrage_pct: float = 20.0
     scalper_used_usd: float = 0.0
     swing_used_usd: float = 0.0
     long_term_used_usd: float = 0.0
+    arbitrage_used_usd: float = 0.0
     total_capital_usd: float = 0.0
 
 
@@ -120,6 +122,8 @@ class RiskEngine:
             allocation.swing_used_usd += amount_usd
         elif bot_type == "long_term":
             allocation.long_term_used_usd += amount_usd
+        elif bot_type == "arbitrage":
+            allocation.arbitrage_used_usd += amount_usd
         await self.save_bucket_allocation(allocation)
 
     async def release_bucket(self, bot_type: str, amount_usd: float):
@@ -130,6 +134,8 @@ class RiskEngine:
             allocation.swing_used_usd = max(0, allocation.swing_used_usd - amount_usd)
         elif bot_type == "long_term":
             allocation.long_term_used_usd = max(0, allocation.long_term_used_usd - amount_usd)
+        elif bot_type == "arbitrage":
+            allocation.arbitrage_used_usd = max(0, allocation.arbitrage_used_usd - amount_usd)
         await self.save_bucket_allocation(allocation)
 
     async def assess_trade(
@@ -157,6 +163,7 @@ class RiskEngine:
             "scalper": (allocation.scalper_pct, allocation.scalper_used_usd),
             "swing": (allocation.swing_pct, allocation.swing_used_usd),
             "long_term": (allocation.long_term_pct, allocation.long_term_used_usd),
+            "arbitrage": (allocation.arbitrage_pct, allocation.arbitrage_used_usd),
         }
         pct, used = bucket_map.get(bot_type, (20.0, 0.0))
         bucket_limit = allocation.total_capital_usd * (pct / 100)
@@ -226,8 +233,50 @@ class RiskEngine:
 
         allocation = await self.get_bucket_allocation()
         allocation.total_capital_usd = total_capital
-        allocation.scalper_pct = 20.0
-        allocation.swing_pct = 40.0
-        allocation.long_term_pct = 40.0
+
+        from app.core.store import trade_store
+        pnl_by_bot = trade_store.pnl_by_bot()
+        bot_types = ["scalper", "swing", "long_term", "arbitrage"]
+        MIN_PCT = 10.0
+        TOTAL_PCT = 100.0
+        distributable = TOTAL_PCT - (MIN_PCT * len(bot_types))
+
+        scores = {}
+        for bt in bot_types:
+            data = pnl_by_bot.get(bt, {"pnl_usd": 0, "trades": 0})
+            pnl = data.get("pnl_usd", 0)
+            trades = data.get("trades", 0)
+            if trades > 0:
+                win_count = sum(
+                    1 for t in trade_store.get_closed_trades()
+                    if t.get("bot_type") == bt and t.get("pnl_usd", 0) > 0
+                )
+                wr = win_count / trades
+            else:
+                wr = 0.0
+            scores[bt] = max(pnl * (0.5 + wr), 0)
+
+        total_score = sum(scores.values())
+        if total_score > 0:
+            for bt in bot_types:
+                bonus = (scores[bt] / total_score) * distributable
+                setattr(allocation, f"{bt}_pct", round(MIN_PCT + bonus, 1))
+        else:
+            equal_share = TOTAL_PCT / len(bot_types)
+            for bt in bot_types:
+                setattr(allocation, f"{bt}_pct", equal_share)
+
+        assigned = sum(getattr(allocation, f"{bt}_pct") for bt in bot_types)
+        if abs(assigned - TOTAL_PCT) > 0.1:
+            diff = TOTAL_PCT - assigned
+            best_bot = max(bot_types, key=lambda bt: scores.get(bt, 0))
+            current = getattr(allocation, f"{best_bot}_pct")
+            setattr(allocation, f"{best_bot}_pct", round(current + diff, 1))
+
         await self.save_bucket_allocation(allocation)
+        logger.info(
+            f"REBALANCE: total=${total_capital:.2f} "
+            f"scalper={allocation.scalper_pct}% swing={allocation.swing_pct}% "
+            f"long_term={allocation.long_term_pct}% arb={allocation.arbitrage_pct}%"
+        )
         return allocation

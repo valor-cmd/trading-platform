@@ -72,6 +72,7 @@ interface RiskStatus {
     scalper_pct: number;
     swing_pct: number;
     long_term_pct: number;
+    arbitrage_pct: number;
   };
 }
 
@@ -608,9 +609,10 @@ function Dashboard() {
             <h3>Bucket Allocation</h3>
           </div>
           {[
-            { label: "Scalper", pct: risk?.bucket_allocation?.scalper_pct ?? 20, color: "#00ff88" },
-            { label: "Swing", pct: risk?.bucket_allocation?.swing_pct ?? 40, color: "#3b82f6" },
-            { label: "Long-Term", pct: risk?.bucket_allocation?.long_term_pct ?? 40, color: "#a855f7" },
+            { label: "Scalper", pct: risk?.bucket_allocation?.scalper_pct ?? 25, color: "#00ff88" },
+            { label: "Swing", pct: risk?.bucket_allocation?.swing_pct ?? 25, color: "#3b82f6" },
+            { label: "Long-Term", pct: risk?.bucket_allocation?.long_term_pct ?? 25, color: "#a855f7" },
+            { label: "Arbitrage", pct: risk?.bucket_allocation?.arbitrage_pct ?? 25, color: "#ff9f1c" },
           ].map((bucket) => (
             <div key={bucket.label} style={{ marginBottom: "1rem" }}>
               <div className="flex-between mb-sm">

@@ -53,8 +53,19 @@ class ArbitrageBot:
         position_usd = min(available, self.arb_engine.config.max_position_usd)
         amount = position_usd / opp.buy_price
 
+        max_slip = self.arb_engine.config.max_slippage_pct / 100.0
+
         buy_order = await buy_adapter.create_order(opp.symbol, "buy", amount, opp.buy_price)
+        buy_slippage = abs(buy_order.price - opp.buy_price) / opp.buy_price if opp.buy_price > 0 else 0
+        if buy_slippage > max_slip:
+            logger.warning(f"ARB ABORTED: buy slippage {buy_slippage*100:.2f}% > max {self.arb_engine.config.max_slippage_pct}% for {opp.symbol}")
+            return
+
         sell_order = await sell_adapter.create_order(opp.symbol, "sell", amount, opp.sell_price)
+        sell_slippage = abs(opp.sell_price - sell_order.price) / opp.sell_price if opp.sell_price > 0 else 0
+        if sell_slippage > max_slip:
+            logger.warning(f"ARB ABORTED: sell slippage {sell_slippage*100:.2f}% > max {self.arb_engine.config.max_slippage_pct}% for {opp.symbol}")
+            return
 
         revenue = sell_order.cost - sell_order.fee
         cost = buy_order.cost + buy_order.fee
@@ -78,7 +89,9 @@ class ArbitrageBot:
             "exit_fee_usd": sell_order.fee,
             "pnl_usd": round(pnl, 4),
             "bucket": "arbitrage",
-            "reasoning": f"Arb: {opp.buy_exchange}->{opp.sell_exchange} spread={opp.spread_pct:.2f}% profit={opp.estimated_profit_pct:.2f}%",
+            "slippage_buy_pct": round(buy_slippage * 100, 4),
+            "slippage_sell_pct": round(sell_slippage * 100, 4),
+            "reasoning": f"Arb: {opp.buy_exchange}->{opp.sell_exchange} spread={opp.spread_pct:.2f}% profit={opp.estimated_profit_pct:.2f}% slip={buy_slippage*100:.2f}%+{sell_slippage*100:.2f}%",
             "is_paper": True,
             "status": "closed",
         }

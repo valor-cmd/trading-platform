@@ -33,7 +33,8 @@ class ArbitrageConfig:
     max_position_usd: float = 500.0
     scan_interval_seconds: int = 10
     include_dex: bool = True
-    slippage_buffer_pct: float = 0.2
+    slippage_buffer_pct: float = 0.5
+    max_slippage_pct: float = 0.5
 
 
 class ArbitrageEngine:
