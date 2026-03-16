@@ -203,6 +203,52 @@ class LivePriceProvider:
             logger.debug(f"Batch ticker fetch failed for {exchange_id}: {e}")
         return {}
 
+    async def refresh_tickers_for_symbols(self, symbols: list[str], timeout: float = 10.0) -> int:
+        by_exchange: dict[str, list[str]] = {}
+        for sym in symbols:
+            for eid, syms in self._all_symbols.items():
+                if sym in syms:
+                    by_exchange.setdefault(eid, []).append(sym)
+                    break
+
+        updated = 0
+
+        async def _refresh_exchange(eid: str, syms: list[str]):
+            nonlocal updated
+            exchange = self._exchanges.get(eid)
+            if not exchange:
+                return
+            try:
+                tickers = await asyncio.wait_for(
+                    exchange.fetch_tickers(syms),
+                    timeout=timeout,
+                )
+                now = time.time()
+                for sym, ticker in tickers.items():
+                    result = {
+                        "symbol": sym,
+                        "exchange": eid,
+                        "last": ticker.get("last") or 0,
+                        "bid": ticker.get("bid") or 0,
+                        "ask": ticker.get("ask") or 0,
+                        "high": ticker.get("high") or 0,
+                        "low": ticker.get("low") or 0,
+                        "volume": ticker.get("baseVolume") or 0,
+                        "change": ticker.get("percentage") or 0,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "_fetched_at": now,
+                    }
+                    self._ticker_cache[f"{eid}:{sym}"] = result
+                    updated += 1
+            except asyncio.TimeoutError:
+                logger.warning(f"Ticker refresh timeout for {eid} ({len(syms)} symbols)")
+            except Exception as e:
+                logger.debug(f"Ticker refresh failed for {eid}: {e}")
+
+        tasks = [_refresh_exchange(eid, syms) for eid, syms in by_exchange.items()]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return updated
+
     def status(self) -> dict:
         return {
             eid: {
