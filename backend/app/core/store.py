@@ -1,8 +1,15 @@
 import json
+import os
 import asyncio
+import logging
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
+
+DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 
 
 class InMemoryStore:
@@ -54,13 +61,50 @@ store = InMemoryStore()
 
 
 class TradeStore:
-    def __init__(self):
+    def __init__(self, persist_path: Optional[str] = None):
         self.trades: list[dict] = []
         self.deposits: list[dict] = []
         self.withdrawals: list[dict] = []
         self.snapshots: list[dict] = []
         self._next_id = 1
         self._running_balance = 0.0
+        self._persist_path = persist_path or os.path.join(DATA_DIR, "trade_store.json")
+        self._save_lock = threading.Lock()
+        self._load()
+
+    def _load(self):
+        try:
+            if os.path.exists(self._persist_path):
+                with open(self._persist_path, "r") as f:
+                    data = json.load(f)
+                self.trades = data.get("trades", [])
+                self.deposits = data.get("deposits", [])
+                self.withdrawals = data.get("withdrawals", [])
+                self.snapshots = data.get("snapshots", [])[-500:]
+                self._next_id = data.get("next_id", 1)
+                self._running_balance = data.get("running_balance", 0.0)
+                logger.info(f"Loaded trade store: {len(self.trades)} trades, {len(self.deposits)} deposits, balance=${self._running_balance:.2f}")
+        except Exception as e:
+            logger.error(f"Failed to load trade store: {e}")
+
+    def _save(self):
+        try:
+            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
+            data = {
+                "trades": self.trades,
+                "deposits": self.deposits,
+                "withdrawals": self.withdrawals,
+                "snapshots": self.snapshots[-500:],
+                "next_id": self._next_id,
+                "running_balance": self._running_balance,
+            }
+            with self._save_lock:
+                tmp = self._persist_path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(data, f)
+                os.replace(tmp, self._persist_path)
+        except Exception as e:
+            logger.error(f"Failed to save trade store: {e}")
 
     def next_id(self) -> int:
         i = self._next_id
@@ -75,6 +119,7 @@ class TradeStore:
             trade["status"] = "open"
         trade["balance_at_entry"] = round(self._running_balance, 2)
         self.trades.append(trade)
+        self._save()
         return trade
 
     def close_trade(self, trade_id: int, exit_price: float, pnl_usd: float, exit_fee: float, status: str = "closed") -> Optional[dict]:
@@ -88,6 +133,7 @@ class TradeStore:
                 t["closed_at"] = datetime.now(timezone.utc).isoformat()
                 self._running_balance += pnl_usd
                 t["balance_at_exit"] = round(self._running_balance, 2)
+                self._save()
                 return t
         return None
 
@@ -102,6 +148,7 @@ class TradeStore:
         dep["timestamp"] = datetime.now(timezone.utc).isoformat()
         self.deposits.append(dep)
         self._running_balance += dep.get("amount_usd", 0)
+        self._save()
         return dep
 
     def add_withdrawal(self, wd: dict) -> dict:
@@ -109,6 +156,7 @@ class TradeStore:
         wd["timestamp"] = datetime.now(timezone.utc).isoformat()
         self.withdrawals.append(wd)
         self._running_balance -= wd.get("amount_usd", 0)
+        self._save()
         return wd
 
     def total_deposits(self) -> float:
@@ -182,6 +230,8 @@ class TradeStore:
             "open_trades": len(self.get_open_trades()),
             "total_trades": len(self.trades),
         })
+        if len(self.snapshots) % 20 == 0:
+            self._save()
 
     def get_portfolio_chart(self, limit: int = 200) -> list[dict]:
         if not self.snapshots:

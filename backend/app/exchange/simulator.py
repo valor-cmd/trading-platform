@@ -1,5 +1,8 @@
+import json
+import os
 import time
 import logging
+import threading
 import pandas as pd
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,13 +11,44 @@ from app.exchange.live_prices import live_prices
 
 logger = logging.getLogger(__name__)
 
+DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
+
 
 class PaperExchangeManager:
-    def __init__(self):
+    def __init__(self, persist_path: Optional[str] = None):
         self.balances: dict[str, float] = {}
         self.connected_exchanges: set[str] = set()
         self.order_count = 0
         self._primary_exchange = "binance"
+        self._persist_path = persist_path or os.path.join(DATA_DIR, "paper_exchange.json")
+        self._save_lock = threading.Lock()
+        self._load()
+
+    def _load(self):
+        try:
+            if os.path.exists(self._persist_path):
+                with open(self._persist_path, "r") as f:
+                    data = json.load(f)
+                self.balances = data.get("balances", {})
+                self.order_count = data.get("order_count", 0)
+                logger.info(f"Loaded paper exchange: balances={self.balances}, orders={self.order_count}")
+        except Exception as e:
+            logger.error(f"Failed to load paper exchange: {e}")
+
+    def _save(self):
+        try:
+            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
+            data = {
+                "balances": self.balances,
+                "order_count": self.order_count,
+            }
+            with self._save_lock:
+                tmp = self._persist_path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(data, f)
+                os.replace(tmp, self._persist_path)
+        except Exception as e:
+            logger.error(f"Failed to save paper exchange: {e}")
 
     def connect(self, exchange_id: str):
         self.connected_exchanges.add(exchange_id)
@@ -104,6 +138,7 @@ class PaperExchangeManager:
             self.balances[quote] = self.balances.get(quote, 0) + revenue - fee
 
         slippage_usd = abs(fill_price - price) * amount
+        self._save()
 
         return {
             "id": f"paper_{self.order_count}_{int(time.time())}",

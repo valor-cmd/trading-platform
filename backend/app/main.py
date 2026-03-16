@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Initialized with ${total_usdt:.2f} USDT")
 
     async def _snapshot_loop():
+        _snap_count = 0
         while True:
             await asyncio.sleep(15)
             try:
@@ -130,6 +131,9 @@ async def lifespan(app: FastAPI):
                     "open_trades": len(open_trades),
                     "total_trades": len(trade_store.trades),
                 })
+                _snap_count += 1
+                if _snap_count % 20 == 0:
+                    trade_store._save()
             except Exception:
                 pass
 

@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { runBacktest } from "../services/api";
+import { runBacktest, getExchangesStatus, getExchangePairs } from "../services/api";
 
 interface BacktestResult {
   symbol: string;
@@ -30,6 +30,13 @@ interface BacktestResult {
     pnl_pct: number;
     fees_usd: number;
   }[];
+}
+
+interface ExchangeInfo {
+  type: string;
+  chain: string | null;
+  connected: boolean;
+  pairs: number;
 }
 
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { value: number }[] }) => {
@@ -60,6 +67,32 @@ function Backtest() {
   });
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exchanges, setExchanges] = useState<Record<string, ExchangeInfo>>({});
+  const [symbols, setSymbols] = useState<string[]>([]);
+  const [symbolSearch, setSymbolSearch] = useState("");
+  const [symbolDropdownOpen, setSymbolDropdownOpen] = useState(false);
+  const [loadingSymbols, setLoadingSymbols] = useState(false);
+
+  useEffect(() => {
+    getExchangesStatus().then((res) => {
+      const exs = res.data?.exchanges ?? {};
+      setExchanges(exs);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!form.exchange_id) return;
+    setLoadingSymbols(true);
+    getExchangePairs(form.exchange_id, "", 5000).then((res) => {
+      const pairs: string[] = res.data?.pairs ?? [];
+      setSymbols(pairs);
+      if (pairs.length > 0 && !pairs.includes(form.symbol)) {
+        const usdt = pairs.find((p) => p.includes("/USDT") || p.includes("/USD"));
+        if (usdt) setForm((f) => ({ ...f, symbol: usdt }));
+      }
+    }).catch(() => setSymbols([]))
+      .finally(() => setLoadingSymbols(false));
+  }, [form.exchange_id]);
 
   const handleRun = async () => {
     setLoading(true);
@@ -80,6 +113,23 @@ function Backtest() {
 
   const profitable = result ? result.final_capital >= result.initial_capital : true;
 
+  const exchangeEntries = Object.entries(exchanges)
+    .filter(([, v]) => v.connected)
+    .sort((a, b) => {
+      if (a[1].type === "cex" && b[1].type !== "cex") return -1;
+      if (a[1].type !== "cex" && b[1].type === "cex") return 1;
+      return a[0].localeCompare(b[0]);
+    });
+
+  const filteredSymbols = symbolSearch
+    ? symbols.filter((s) => s.toLowerCase().includes(symbolSearch.toLowerCase())).slice(0, 50)
+    : symbols.slice(0, 50);
+
+  const formatExchangeName = (id: string, info: ExchangeInfo) => {
+    const label = id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    return info.type === "dex" ? `${label} (DEX)` : label;
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -91,13 +141,73 @@ function Backtest() {
           <h3>Strategy Tester</h3>
         </div>
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-          <div className="input-group" style={{ flex: 1, minWidth: 120 }}>
-            <label className="input-label">Exchange</label>
-            <input value={form.exchange_id} onChange={(e) => setForm({ ...form, exchange_id: e.target.value })} />
+          <div className="input-group" style={{ flex: 1, minWidth: 160 }}>
+            <label className="input-label">Exchange / DEX</label>
+            <select
+              value={form.exchange_id}
+              onChange={(e) => setForm({ ...form, exchange_id: e.target.value, symbol: "" })}
+            >
+              {exchangeEntries.length === 0 && (
+                <option value={form.exchange_id}>{form.exchange_id}</option>
+              )}
+              {exchangeEntries.map(([id, info]) => (
+                <option key={id} value={id}>
+                  {formatExchangeName(id, info)} ({info.pairs} pairs)
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="input-group" style={{ flex: 1, minWidth: 120 }}>
+          <div className="input-group" style={{ flex: 1, minWidth: 160, position: "relative" }}>
             <label className="input-label">Symbol</label>
-            <input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} />
+            <input
+              value={symbolDropdownOpen ? symbolSearch : form.symbol}
+              onChange={(e) => {
+                setSymbolSearch(e.target.value);
+                setSymbolDropdownOpen(true);
+              }}
+              onFocus={() => {
+                setSymbolDropdownOpen(true);
+                setSymbolSearch(form.symbol);
+              }}
+              onBlur={() => setTimeout(() => setSymbolDropdownOpen(false), 200)}
+              placeholder={loadingSymbols ? "Loading..." : "Search symbol..."}
+            />
+            {symbolDropdownOpen && filteredSymbols.length > 0 && (
+              <div style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                right: 0,
+                background: "#1a1a1a",
+                border: "1px solid #333",
+                borderRadius: 8,
+                maxHeight: 200,
+                overflowY: "auto",
+                zIndex: 100,
+              }}>
+                {filteredSymbols.map((sym) => (
+                  <div
+                    key={sym}
+                    onMouseDown={() => {
+                      setForm({ ...form, symbol: sym });
+                      setSymbolSearch(sym);
+                      setSymbolDropdownOpen(false);
+                    }}
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      cursor: "pointer",
+                      fontSize: "0.85rem",
+                      borderBottom: "1px solid #222",
+                      background: sym === form.symbol ? "rgba(255,255,255,0.05)" : "transparent",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = sym === form.symbol ? "rgba(255,255,255,0.05)" : "transparent")}
+                  >
+                    {sym}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="input-group" style={{ flex: 1, minWidth: 100 }}>
             <label className="input-label">Timeframe</label>
@@ -125,7 +235,7 @@ function Backtest() {
           <button
             className="btn btn-primary"
             onClick={handleRun}
-            disabled={loading}
+            disabled={loading || !form.symbol}
             style={{ marginTop: "auto" }}
           >
             {loading ? "Running..." : "Run Backtest"}
