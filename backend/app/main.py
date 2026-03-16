@@ -115,13 +115,19 @@ async def lifespan(app: FastAPI):
     logger.info(f"Initialized with ${total_usdt:.2f} USDT")
 
     async def _price_refresh_loop():
+        dex_adapters = {
+            eid: adapter for eid, adapter in exchange_registry.get_all().items()
+            if adapter.exchange_type.value == "dex" and adapter.is_connected()
+        }
         while True:
             await asyncio.sleep(15)
             try:
                 open_trades = trade_store.get_open_trades()
                 symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
                 if symbols:
-                    count = await live_prices.refresh_tickers_for_symbols(symbols, timeout=12.0)
+                    count = await live_prices.refresh_tickers_for_symbols(
+                        symbols, timeout=12.0, dex_adapters=dex_adapters,
+                    )
                     if count > 0:
                         logger.debug(f"Price refresh: updated {count}/{len(symbols)} open position prices")
             except Exception as e:

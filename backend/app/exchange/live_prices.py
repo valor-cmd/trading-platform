@@ -203,13 +203,19 @@ class LivePriceProvider:
             logger.debug(f"Batch ticker fetch failed for {exchange_id}: {e}")
         return {}
 
-    async def refresh_tickers_for_symbols(self, symbols: list[str], timeout: float = 10.0) -> int:
+    async def refresh_tickers_for_symbols(self, symbols: list[str], timeout: float = 10.0,
+                                          dex_adapters: dict = None) -> int:
         by_exchange: dict[str, list[str]] = {}
+        unresolved: list[str] = []
         for sym in symbols:
+            found = False
             for eid, syms in self._all_symbols.items():
                 if sym in syms:
                     by_exchange.setdefault(eid, []).append(sym)
+                    found = True
                     break
+            if not found:
+                unresolved.append(sym)
 
         updated = 0
 
@@ -247,6 +253,45 @@ class LivePriceProvider:
 
         tasks = [_refresh_exchange(eid, syms) for eid, syms in by_exchange.items()]
         await asyncio.gather(*tasks, return_exceptions=True)
+
+        if unresolved and dex_adapters:
+            dex_by_adapter: dict[str, list[str]] = {}
+            for sym in unresolved:
+                for dex_id, adapter in dex_adapters.items():
+                    if sym in adapter.get_all_symbols():
+                        dex_by_adapter.setdefault(dex_id, []).append(sym)
+                        break
+
+            async def _refresh_dex_symbol(dex_id: str, sym: str, adapter):
+                nonlocal updated
+                try:
+                    ticker = await asyncio.wait_for(adapter.fetch_ticker(sym), timeout=5.0)
+                    if ticker and ticker.last > 0:
+                        self._ticker_cache[f"{dex_id}:{sym}"] = {
+                            "symbol": sym,
+                            "exchange": dex_id,
+                            "last": ticker.last,
+                            "bid": ticker.bid,
+                            "ask": ticker.ask,
+                            "high": ticker.high_24h,
+                            "low": ticker.low_24h,
+                            "volume": ticker.volume_24h,
+                            "change": ticker.change_pct_24h,
+                            "timestamp": ticker.timestamp,
+                            "_fetched_at": time.time(),
+                        }
+                        updated += 1
+                except Exception:
+                    pass
+
+            dex_tasks = []
+            for dex_id, syms in dex_by_adapter.items():
+                adapter = dex_adapters[dex_id]
+                for sym in syms[:20]:
+                    dex_tasks.append(_refresh_dex_symbol(dex_id, sym, adapter))
+            if dex_tasks:
+                await asyncio.gather(*dex_tasks, return_exceptions=True)
+
         return updated
 
     def status(self) -> dict:
