@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.security import require_auth, RateLimitMiddleware
 
-from app.api.routes import router, risk_engine, _fetch_prices_batch, _calc_open_position_value
+from app.api.routes import router, risk_engine, _fast_live_balance
 from app.api.hummingbot_routes import hbot_router
 from app.hummingbot.manager import hbot_manager
 from app.core.store import trade_store
@@ -119,16 +119,11 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(15)
             try:
-                usdt = paper_exchange.balances.get("USDT", 0)
-                open_trades = trade_store.get_open_trades()
-                symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-                prices = await _fetch_prices_batch(symbols, timeout_sec=5.0)
-                open_pos_value = await _calc_open_position_value(open_trades, prices)
-                live_balance = usdt + open_pos_value
+                live_balance = _fast_live_balance()
                 trade_store.snapshots.append({
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "balance": round(live_balance, 5),
-                    "open_trades": len(open_trades),
+                    "balance": live_balance,
+                    "open_trades": len(trade_store.get_open_trades()),
                     "total_trades": len(trade_store.trades),
                 })
                 _snap_count += 1
@@ -337,15 +332,7 @@ async def tokens_by_chain(chain: str):
 @app.get("/api/portfolio/chart")
 async def portfolio_chart(limit: int = 200):
     data = trade_store.get_portfolio_chart(limit)
-    usdt = paper_exchange.balances.get("USDT", 0)
-    open_trades = trade_store.get_open_trades()
-    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-    try:
-        prices = await _fetch_prices_batch(symbols, timeout_sec=8.0)
-    except Exception:
-        prices = {}
-    open_pos_value = await _calc_open_position_value(open_trades, prices)
-    now_balance = round(usdt + open_pos_value, 5)
+    now_balance = _fast_live_balance()
     data.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": now_balance,
