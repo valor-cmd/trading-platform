@@ -333,6 +333,7 @@ async def portfolio_chart(limit: int = 200):
 
     trades = []
     for t in trade_store.trades:
+        trade_id = t.get("id", 0)
         ts = t.get("opened_at", "")
         if ts:
             trades.append({
@@ -343,6 +344,13 @@ async def portfolio_chart(limit: int = 200):
                 "quantity": t.get("quantity", 0),
                 "bot_type": t.get("bot_type", ""),
                 "type": "entry",
+                "trade_id": trade_id,
+                "stop_loss": t.get("stop_loss_price", 0),
+                "take_profit": t.get("take_profit_price", 0),
+                "entry_fee": t.get("entry_fee_usd", 0),
+                "strategy": t.get("strategy", ""),
+                "signal_score": t.get("signal_score", 0),
+                "status": t.get("status", "open"),
             })
         if t.get("status") in ("closed", "stopped_out") and t.get("closed_at"):
             trades.append({
@@ -353,6 +361,14 @@ async def portfolio_chart(limit: int = 200):
                 "quantity": t.get("quantity", 0),
                 "bot_type": t.get("bot_type", ""),
                 "type": "exit",
+                "trade_id": trade_id,
+                "pnl_usd": t.get("pnl_usd", 0),
+                "pnl_pct": t.get("pnl_pct", 0),
+                "exit_fee": t.get("exit_fee_usd", 0),
+                "exit_reason": t.get("exit_reason", ""),
+                "entry_price": t.get("entry_price", 0),
+                "strategy": t.get("strategy", ""),
+                "status": t.get("status", "closed"),
             })
 
     events = []

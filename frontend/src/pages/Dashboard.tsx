@@ -41,6 +41,28 @@ interface LiveBalance {
   open_trade_count: number;
 }
 
+interface TradeEvent {
+  timestamp: string;
+  side: string;
+  symbol: string;
+  price: number;
+  quantity: number;
+  bot_type: string;
+  type: "entry" | "exit";
+  trade_id: number;
+  stop_loss?: number;
+  take_profit?: number;
+  entry_fee?: number;
+  strategy?: string;
+  signal_score?: number;
+  status?: string;
+  pnl_usd?: number;
+  pnl_pct?: number;
+  exit_fee?: number;
+  exit_reason?: string;
+  entry_price?: number;
+}
+
 interface RiskStatus {
   daily_pnl_usd: number;
   circuit_breaker_active: boolean;
@@ -97,6 +119,8 @@ function Dashboard() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [rebalanceMsg, setRebalanceMsg] = useState("");
   const [showTradeDots, setShowTradeDots] = useState(true);
+  const [selectedTrade, setSelectedTrade] = useState<TradeEvent | null>(null);
+  const [tradeEventsMap, setTradeEventsMap] = useState<Record<string, TradeEvent>>({});
 
   const load = async () => {
     try {
@@ -116,12 +140,13 @@ function Dashboard() {
       setLiveBalance(lb.data);
 
       const chartPoints: { timestamp: string; balance: number }[] = p.data?.chart ?? p.data ?? [];
-      const tradeEvents: { timestamp: string; side: string }[] = p.data?.trades ?? [];
+      const tradeEvents: TradeEvent[] = p.data?.trades ?? [];
       const depositEvents: { timestamp: string; type: string }[] = p.data?.events ?? [];
 
-      const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit"; used: boolean }[] = [];
+      const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit"; used: boolean; tradeEvent?: TradeEvent }[] = [];
+      const teMap: Record<string, TradeEvent> = {};
       for (const te of tradeEvents) {
-        allMarkers.push({ timestamp: te.timestamp, kind: te.side === "buy" ? "buy" : "sell", used: false });
+        allMarkers.push({ timestamp: te.timestamp, kind: te.side === "buy" ? "buy" : "sell", used: false, tradeEvent: te });
       }
       for (const de of depositEvents) {
         if (de.type === "deposit") {
@@ -144,6 +169,7 @@ function Dashboard() {
         if (bestIdx >= 0) {
           allMarkers[bestIdx].used = true;
           const mk = allMarkers[bestIdx];
+          if (mk.tradeEvent) teMap[pt.timestamp] = mk.tradeEvent;
           return {
             ...pt,
             buy: mk.kind === "buy" ? pt.balance : undefined,
@@ -171,8 +197,15 @@ function Dashboard() {
         }
       }
 
+      for (const mk of allMarkers) {
+        if (!mk.used && mk.tradeEvent) {
+          teMap[mk.timestamp] = mk.tradeEvent;
+        }
+      }
+
       merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
       setChartData(merged);
+      setTradeEventsMap(teMap);
     } catch {
       /* API not connected */
     }
@@ -336,7 +369,16 @@ function Dashboard() {
                 dot={false}
               />
               {showTradeDots && (
-                <Scatter dataKey="buy" shape="circle" fill="#00ff88" isAnimationActive={false}>
+                <Scatter dataKey="buy" shape="circle" fill="#00ff88" isAnimationActive={false}
+                  onClick={(_: unknown, idx: number) => {
+                    const pt = filteredChart[idx];
+                    if (pt?.buy != null) {
+                      const te = tradeEventsMap[pt.timestamp];
+                      if (te) setSelectedTrade(te);
+                    }
+                  }}
+                  cursor="pointer"
+                >
                   {filteredChart.map((entry, i) => (
                     entry.buy != null
                       ? <Cell key={i} fill="#00ff88" stroke="#000" strokeWidth={1} r={5} />
@@ -345,7 +387,16 @@ function Dashboard() {
                 </Scatter>
               )}
               {showTradeDots && (
-                <Scatter dataKey="sell" shape="circle" fill="#ff4d6a" isAnimationActive={false}>
+                <Scatter dataKey="sell" shape="circle" fill="#ff4d6a" isAnimationActive={false}
+                  onClick={(_: unknown, idx: number) => {
+                    const pt = filteredChart[idx];
+                    if (pt?.sell != null) {
+                      const te = tradeEventsMap[pt.timestamp];
+                      if (te) setSelectedTrade(te);
+                    }
+                  }}
+                  cursor="pointer"
+                >
                   {filteredChart.map((entry, i) => (
                     entry.sell != null
                       ? <Cell key={i} fill="#ff4d6a" stroke="#000" strokeWidth={1} r={5} />
@@ -576,6 +627,179 @@ function Dashboard() {
           </div>
         </div>
       </div>
+      {selectedTrade && (
+        <div
+          onClick={() => setSelectedTrade(null)}
+          style={{
+            position: "fixed",
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.7)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#1a1a1a",
+              border: "1px solid #333",
+              borderRadius: 16,
+              padding: "1.5rem",
+              maxWidth: 480,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            <button
+              onClick={() => setSelectedTrade(null)}
+              style={{
+                position: "absolute", top: 12, right: 16,
+                background: "transparent", border: "none", color: "#888",
+                fontSize: "1.2rem", cursor: "pointer",
+              }}
+            >
+              x
+            </button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: "50%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "1.2rem", fontWeight: 700,
+                background: selectedTrade.type === "entry"
+                  ? (selectedTrade.side === "buy" ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)")
+                  : (selectedTrade.pnl_usd != null && selectedTrade.pnl_usd >= 0 ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)"),
+                color: selectedTrade.type === "entry"
+                  ? (selectedTrade.side === "buy" ? "#00ff88" : "#ff4d6a")
+                  : (selectedTrade.pnl_usd != null && selectedTrade.pnl_usd >= 0 ? "#00ff88" : "#ff4d6a"),
+              }}>
+                {selectedTrade.type === "entry" ? (selectedTrade.side === "buy" ? "B" : "S") : (selectedTrade.pnl_usd != null && selectedTrade.pnl_usd >= 0 ? "+" : "-")}
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>
+                  {selectedTrade.type === "entry" ? "Entry" : "Exit"} - {selectedTrade.symbol}
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <span style={{
+                    fontSize: "0.65rem",
+                    padding: "0.1rem 0.4rem",
+                    borderRadius: 20,
+                    background: selectedTrade.side === "buy" ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)",
+                    color: selectedTrade.side === "buy" ? "#00ff88" : "#ff4d6a",
+                    fontWeight: 600,
+                  }}>
+                    {selectedTrade.side.toUpperCase()}
+                  </span>
+                  {selectedTrade.bot_type && (
+                    <span style={{
+                      fontSize: "0.65rem",
+                      padding: "0.1rem 0.4rem",
+                      borderRadius: 20,
+                      background: "rgba(255,255,255,0.08)",
+                      color: "#aaa",
+                      fontWeight: 500,
+                      textTransform: "capitalize",
+                    }}>
+                      {selectedTrade.bot_type.replace("_", " ")} bot
+                    </span>
+                  )}
+                  {selectedTrade.status && (
+                    <span style={{
+                      fontSize: "0.65rem",
+                      padding: "0.1rem 0.4rem",
+                      borderRadius: 20,
+                      background: selectedTrade.status === "open" ? "rgba(0,255,136,0.1)" : selectedTrade.status === "stopped_out" ? "rgba(255,77,106,0.1)" : "rgba(255,255,255,0.06)",
+                      color: selectedTrade.status === "open" ? "#00ff88" : selectedTrade.status === "stopped_out" ? "#ff4d6a" : "#888",
+                      fontWeight: 500,
+                    }}>
+                      {selectedTrade.status.replace("_", " ")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ borderTop: "1px solid #333", paddingTop: "0.75rem" }}>
+              {[
+                { label: "Time", value: new Date(selectedTrade.timestamp).toLocaleString() },
+                { label: "Price", value: `$${selectedTrade.price?.toLocaleString("en", { maximumFractionDigits: 8 }) ?? "—"}` },
+                { label: "Quantity", value: selectedTrade.quantity?.toFixed(6) ?? "—" },
+                ...(selectedTrade.type === "entry" ? [
+                  { label: "Stop Loss", value: selectedTrade.stop_loss ? `$${selectedTrade.stop_loss.toLocaleString("en", { maximumFractionDigits: 8 })}` : "None", cls: "negative" },
+                  { label: "Take Profit", value: selectedTrade.take_profit ? `$${selectedTrade.take_profit.toLocaleString("en", { maximumFractionDigits: 8 })}` : "None", cls: "positive" },
+                  { label: "Entry Fee", value: selectedTrade.entry_fee != null ? `$${selectedTrade.entry_fee.toFixed(5)}` : "—" },
+                  { label: "Signal Score", value: selectedTrade.signal_score != null ? String(selectedTrade.signal_score) : "—" },
+                ] : [
+                  { label: "Entry Price", value: selectedTrade.entry_price ? `$${selectedTrade.entry_price.toLocaleString("en", { maximumFractionDigits: 8 })}` : "—" },
+                  { label: "P&L", value: selectedTrade.pnl_usd != null ? `${selectedTrade.pnl_usd >= 0 ? "+" : ""}$${selectedTrade.pnl_usd.toFixed(5)}` : "—", cls: (selectedTrade.pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "P&L %", value: selectedTrade.pnl_pct != null ? `${selectedTrade.pnl_pct >= 0 ? "+" : ""}${selectedTrade.pnl_pct}%` : "—", cls: (selectedTrade.pnl_pct ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Exit Fee", value: selectedTrade.exit_fee != null ? `$${selectedTrade.exit_fee.toFixed(5)}` : "—" },
+                  { label: "Exit Reason", value: selectedTrade.exit_reason ? selectedTrade.exit_reason.replace("_", " ") : "—",
+                    cls: selectedTrade.exit_reason === "take_profit" ? "positive" : selectedTrade.exit_reason === "stop_loss" || selectedTrade.exit_reason === "stopped_out" ? "negative" : undefined },
+                ]),
+                ...(selectedTrade.strategy ? [{ label: "Strategy", value: selectedTrade.strategy }] : []),
+              ].map((row: { label: string; value: string; cls?: string }) => (
+                <div key={row.label} style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "0.45rem 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.05)",
+                }}>
+                  <span style={{ fontSize: "0.8rem", color: "#888" }}>{row.label}</span>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 600 }} className={row.cls ?? ""}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+
+            {selectedTrade.type === "entry" && selectedTrade.stop_loss != null && selectedTrade.take_profit != null && selectedTrade.price > 0 && (
+              <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
+                <div style={{ fontSize: "0.7rem", color: "#888", marginBottom: "0.4rem", fontWeight: 600 }}>Risk/Reward</div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#333", position: "relative", overflow: "hidden" }}>
+                    {(() => {
+                      const riskDist = Math.abs(selectedTrade.price - (selectedTrade.stop_loss ?? 0));
+                      const rewardDist = Math.abs((selectedTrade.take_profit ?? 0) - selectedTrade.price);
+                      const total = riskDist + rewardDist;
+                      const riskPct = total > 0 ? (riskDist / total) * 100 : 50;
+                      return (
+                        <>
+                          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${riskPct}%`, background: "#ff4d6a", borderRadius: 3 }} />
+                          <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: `${100 - riskPct}%`, background: "#00ff88", borderRadius: 3 }} />
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <span style={{ fontSize: "0.7rem", color: "#aaa", whiteSpace: "nowrap" }}>
+                    1:{((Math.abs((selectedTrade.take_profit ?? 0) - selectedTrade.price)) / (Math.abs(selectedTrade.price - (selectedTrade.stop_loss ?? selectedTrade.price)) || 1)).toFixed(1)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {selectedTrade.type === "exit" && (
+              <div style={{
+                marginTop: "0.75rem",
+                padding: "0.75rem",
+                borderRadius: 8,
+                background: (selectedTrade.pnl_usd ?? 0) >= 0 ? "rgba(0,255,136,0.06)" : "rgba(255,77,106,0.06)",
+                textAlign: "center",
+              }}>
+                <div style={{ fontSize: "0.7rem", color: "#888", marginBottom: "0.25rem" }}>Trade Result</div>
+                <div style={{
+                  fontSize: "1.3rem",
+                  fontWeight: 700,
+                  color: (selectedTrade.pnl_usd ?? 0) >= 0 ? "#00ff88" : "#ff4d6a",
+                }}>
+                  {(selectedTrade.pnl_usd ?? 0) >= 0 ? "PROFIT" : "LOSS"} {(selectedTrade.pnl_usd ?? 0) >= 0 ? "+" : ""}${(selectedTrade.pnl_usd ?? 0).toFixed(5)}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

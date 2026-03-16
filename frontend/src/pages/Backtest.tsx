@@ -39,6 +39,107 @@ interface ExchangeInfo {
   pairs: number;
 }
 
+interface StrategyPreset {
+  id: string;
+  name: string;
+  botType: string;
+  color: string;
+  icon: string;
+  description: string;
+  indicators: string[];
+  params: {
+    exchange_id: string;
+    symbol: string;
+    timeframe: string;
+    initial_capital: number;
+    risk_per_trade_pct: number;
+    limit: number;
+  };
+}
+
+const STRATEGY_PRESETS: StrategyPreset[] = [
+  {
+    id: "scalper_momentum",
+    name: "Momentum Scalp",
+    botType: "Scalper Strat",
+    color: "#00ff88",
+    icon: "⚡",
+    description: "High-frequency scalping using RSI oversold/overbought zones with MACD crossover confirmation and Bollinger Band squeeze breakouts. Targets quick 1-2% moves with tight ATR-based stops.",
+    indicators: ["RSI(14)", "MACD(12,26,9)", "Bollinger(20,2)", "Volume Spike", "ATR(14)"],
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "5m", initial_capital: 1000, risk_per_trade_pct: 2, limit: 500 },
+  },
+  {
+    id: "scalper_mean_reversion",
+    name: "Mean Reversion Snipe",
+    botType: "Snipe Strat",
+    color: "#00e5ff",
+    icon: "🎯",
+    description: "Snipes extreme RSI deviations (<25 or >75) combined with Bollinger Band touches. Enters when price is 2+ standard deviations from mean with volume confirmation. Quick in-and-out trades.",
+    indicators: ["RSI(14) extremes", "Bollinger Band touch", "Volume confirm", "EMA(9) direction"],
+    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "5m", initial_capital: 1000, risk_per_trade_pct: 2, limit: 500 },
+  },
+  {
+    id: "swing_trend",
+    name: "EMA Trend Rider",
+    botType: "Swing Strat",
+    color: "#3b82f6",
+    icon: "〰",
+    description: "Swing strategy riding medium-term trends using EMA(9/21/50) alignment with sentiment-weighted entries. Uses Fear & Greed Index as a contrarian filter — buys fear, sells greed. Holds 4h-2d.",
+    indicators: ["EMA(9,21,50)", "MACD trend", "Fear & Greed Index", "RSI(14)", "ATR trailing stop"],
+    params: { exchange_id: "coinbase", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 500 },
+  },
+  {
+    id: "swing_breakout",
+    name: "Support/Resistance Breakout",
+    botType: "Swing Strat",
+    color: "#8b5cf6",
+    icon: "📊",
+    description: "Identifies key support/resistance levels and enters on confirmed breakouts with volume expansion. Uses EMA alignment for trend direction and MACD for momentum confirmation. Wider stops for swing holds.",
+    indicators: ["S/R levels", "Volume breakout", "EMA(21,50) alignment", "MACD momentum", "Bollinger expansion"],
+    params: { exchange_id: "binance", symbol: "SOL/USDT", timeframe: "4h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 300 },
+  },
+  {
+    id: "long_term_macro",
+    name: "Macro Sentiment Accumulator",
+    botType: "Long-Term Strat",
+    color: "#a855f7",
+    icon: "📈",
+    description: "Long-term accumulation strategy heavily weighted by market sentiment. Buys aggressively during Extreme Fear (FGI < 20), scales in during Fear zones, and takes profit during Extreme Greed. Uses weekly EMA(50/200) golden/death cross.",
+    indicators: ["Fear & Greed Index (heavy)", "EMA(50,200) cross", "Weekly RSI", "MACD weekly", "Volume trend"],
+    params: { exchange_id: "coinbase", symbol: "BTC/USDT", timeframe: "1d", initial_capital: 5000, risk_per_trade_pct: 1.5, limit: 365 },
+  },
+  {
+    id: "grid_range",
+    name: "Grid Bot Range Trader",
+    botType: "Grid Bot Strat",
+    color: "#ff9f1c",
+    icon: "⊞",
+    description: "Places a grid of buy/sell orders across a defined price range. Profits from sideways price oscillation by buying dips and selling rips within the range. Uses Bollinger Bands to define dynamic grid boundaries and ATR for grid spacing.",
+    indicators: ["Bollinger(20,2) range", "ATR(14) grid spacing", "RSI mean reversion", "Volume profile"],
+    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "15m", initial_capital: 2000, risk_per_trade_pct: 1, limit: 500 },
+  },
+  {
+    id: "multi_factor",
+    name: "Multi-Factor Convergence",
+    botType: "Multi-Factor Strat",
+    color: "#f43f5e",
+    icon: "◈",
+    description: "Requires convergence of 3+ independent signals before entry: RSI zone + MACD crossover + EMA alignment + volume confirmation + sentiment bias. Highest confidence trades only. Scores each factor and requires minimum score of 4/6.",
+    indicators: ["RSI(14) zone", "MACD crossover", "EMA(9,21,50) align", "Volume spike", "Bollinger position", "Sentiment bias"],
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 3000, risk_per_trade_pct: 2, limit: 500 },
+  },
+  {
+    id: "arb_cross_exchange",
+    name: "Cross-Exchange Arbitrage",
+    botType: "Arbitrage Strat",
+    color: "#06b6d4",
+    icon: "⇄",
+    description: "Scans price differentials across 9+ CEXs and DEXs simultaneously. Executes when spread exceeds 0.3% after fees. Simultaneous buy on cheaper exchange and sell on expensive one. Max 5% capital per trade, 3 concurrent positions.",
+    indicators: ["Price spread > 0.3%", "Fee calculation", "Liquidity check", "Slippage estimate"],
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1m", initial_capital: 5000, risk_per_trade_pct: 5, limit: 200 },
+  },
+];
+
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { value: number }[] }) => {
   if (active && payload?.length) {
     return (
@@ -65,6 +166,7 @@ function Backtest() {
     risk_per_trade_pct: 2,
     limit: 500,
   });
+  const [activePreset, setActivePreset] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [exchanges, setExchanges] = useState<Record<string, ExchangeInfo>>({});
@@ -93,6 +195,12 @@ function Backtest() {
     }).catch(() => setSymbols([]))
       .finally(() => setLoadingSymbols(false));
   }, [form.exchange_id]);
+
+  const handlePresetSelect = (preset: StrategyPreset) => {
+    setActivePreset(preset.id);
+    setForm(preset.params);
+    setResult(null);
+  };
 
   const handleRun = async () => {
     setLoading(true);
@@ -136,9 +244,108 @@ function Backtest() {
         <h2>Backtesting</h2>
       </div>
 
+      <div className="mb-md">
+        <h3 style={{ marginBottom: "0.75rem" }}>Strategy Presets</h3>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+          gap: "0.75rem",
+        }}>
+          {STRATEGY_PRESETS.map((preset) => (
+            <div
+              key={preset.id}
+              onClick={() => handlePresetSelect(preset)}
+              style={{
+                background: activePreset === preset.id ? "rgba(255,255,255,0.06)" : "var(--card-bg, #141414)",
+                border: activePreset === preset.id ? `1px solid ${preset.color}` : "1px solid var(--border, #222)",
+                borderRadius: 12,
+                padding: "1rem",
+                cursor: "pointer",
+                transition: "all 0.2s",
+                position: "relative",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                if (activePreset !== preset.id) e.currentTarget.style.border = `1px solid ${preset.color}55`;
+              }}
+              onMouseLeave={(e) => {
+                if (activePreset !== preset.id) e.currentTarget.style.border = "1px solid var(--border, #222)";
+              }}
+            >
+              <div style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                background: preset.color,
+                opacity: activePreset === preset.id ? 1 : 0.3,
+              }} />
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                <span style={{ fontSize: "1.2rem" }}>{preset.icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{preset.name}</div>
+                  <span style={{
+                    fontSize: "0.6rem",
+                    padding: "0.1rem 0.4rem",
+                    borderRadius: 20,
+                    background: `${preset.color}20`,
+                    color: preset.color,
+                    fontWeight: 600,
+                    letterSpacing: "0.02em",
+                  }}>
+                    {preset.botType}
+                  </span>
+                </div>
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-secondary, #888)", lineHeight: 1.5, marginBottom: "0.5rem" }}>
+                {preset.description}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                {preset.indicators.map((ind) => (
+                  <span key={ind} style={{
+                    fontSize: "0.6rem",
+                    padding: "0.15rem 0.4rem",
+                    borderRadius: 6,
+                    background: "rgba(255,255,255,0.06)",
+                    color: "var(--text-secondary, #888)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}>
+                    {ind}
+                  </span>
+                ))}
+              </div>
+              <div style={{
+                display: "flex",
+                gap: "0.75rem",
+                marginTop: "0.5rem",
+                fontSize: "0.65rem",
+                color: "var(--text-tertiary, #666)",
+              }}>
+                <span>{preset.params.timeframe} candles</span>
+                <span>${preset.params.initial_capital}</span>
+                <span>{preset.params.risk_per_trade_pct}% risk</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="card mb-md">
         <div className="card-header">
           <h3>Strategy Tester</h3>
+          {activePreset && (
+            <span style={{
+              fontSize: "0.7rem",
+              padding: "0.15rem 0.5rem",
+              borderRadius: 20,
+              background: `${STRATEGY_PRESETS.find((p) => p.id === activePreset)?.color ?? "#fff"}20`,
+              color: STRATEGY_PRESETS.find((p) => p.id === activePreset)?.color ?? "#fff",
+              fontWeight: 600,
+            }}>
+              {STRATEGY_PRESETS.find((p) => p.id === activePreset)?.name}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
           <div className="input-group" style={{ flex: 1, minWidth: 160 }}>
