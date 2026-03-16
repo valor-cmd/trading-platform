@@ -122,7 +122,11 @@ class BaseBot(ABC):
                 signal = analyzer.analyze()
 
                 has_open = any(t["symbol"] == symbol for t in self.active_trades)
-                if not has_open:
+                has_open_global = any(
+                    t.get("symbol") == symbol and t.get("status") == "open"
+                    for t in trade_store.get_open_trades()
+                )
+                if not has_open and not has_open_global:
                     if await self.evaluate_entry(symbol, signal, sentiment_interp):
                         side = self._determine_side(signal)
 
