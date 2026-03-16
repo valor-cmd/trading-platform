@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Scatter, Cell,
+  CartesianGrid, Scatter, Cell, Brush,
 } from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
@@ -278,17 +278,14 @@ function Dashboard() {
 
   const formatXAxisTick = (ts: string) => {
     const d = new Date(ts);
-    const rangeMs: Record<string, number> = {
-      "1M": 60000, "5M": 300000, "15M": 900000, "1H": 3600000,
-      "4H": 14400000, "1D": 86400000, "1W": 604800000,
-    };
-    const ms = rangeMs[timeRange] ?? 604800000;
-    if (ms <= 3600000) {
+    if (timeRange === "1M" || timeRange === "5M" || timeRange === "15M") {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } else if (timeRange === "1H" || timeRange === "4H") {
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } else if (ms <= 86400000) {
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } else if (timeRange === "1D") {
+      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     }
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
   const filteredChart = filterChartByRange(chartData, timeRange);
@@ -368,6 +365,16 @@ function Dashboard() {
                 tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               />
               <Tooltip content={<CustomTooltip />} />
+              <Brush
+                dataKey="timestamp"
+                height={20}
+                stroke="#444"
+                fill="#1a1a1a"
+                tickFormatter={(ts: string) => {
+                  const d = new Date(ts);
+                  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+                }}
+              />
               <Area
                 type="monotone"
                 dataKey="balance"
