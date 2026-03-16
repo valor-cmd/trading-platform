@@ -313,33 +313,6 @@ function Bots() {
         </div>
       </div>
 
-      <div className="card mb-md">
-        <div className="card-header">
-          <h3>Live Price Sources</h3>
-          <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
-            Click to expand pairs · Search any asset
-          </span>
-        </div>
-        {liveExchangeEntries.map(([eid, ex]) => (
-          <ExchangeDropdown
-            key={eid}
-            eid={eid}
-            label={ex.label || eid}
-            pairCount={ex.pairs}
-            icon="🏦"
-          />
-        ))}
-        {dexEntries.map(([eid, ex]) => (
-          <ExchangeDropdown
-            key={eid}
-            eid={eid}
-            label={eid.replace("_", " ").replace("dex", "DEX")}
-            pairCount={ex.pairs}
-            icon="🔗"
-          />
-        ))}
-      </div>
-
       <div className="tabs mb-md">
         {["all", "scalper", "swing", "long_term", "arbitrage"].map((tab) => (
           <button
@@ -516,6 +489,33 @@ function Bots() {
             </div>
           );
         })}
+
+      <div className="card mb-md">
+        <div className="card-header">
+          <h3>Live Price Sources</h3>
+          <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
+            Click to expand pairs · Search any asset
+          </span>
+        </div>
+        {liveExchangeEntries.map(([eid, ex]) => (
+          <ExchangeDropdown
+            key={eid}
+            eid={eid}
+            label={ex.label || eid}
+            pairCount={ex.pairs}
+            icon="🏦"
+          />
+        ))}
+        {dexEntries.map(([eid, ex]) => (
+          <ExchangeDropdown
+            key={eid}
+            eid={eid}
+            label={eid.replace("_", " ").replace("dex", "DEX")}
+            pairCount={ex.pairs}
+            icon="🔗"
+          />
+        ))}
+      </div>
     </div>
   );
 }
