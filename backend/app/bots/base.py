@@ -9,8 +9,9 @@ from typing import Optional
 from app.core.store import store, trade_store
 from app.exchange.simulator import PaperExchangeManager
 from app.exchange.registry import exchange_registry
-from app.indicators.technical import TechnicalAnalyzer, SignalResult
+from app.indicators.technical import TechnicalAnalyzer, SignalResult, MarketRegime
 from app.indicators.sentiment import SentimentAnalyzer
+from app.indicators.confirmation import evaluate_confirmation, ConfirmationResult
 from app.risk.engine import RiskEngine, RiskAssessment
 from app.models.trade import BotType
 
@@ -60,6 +61,36 @@ class BaseBot(ABC):
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         pass
 
+    def _determine_side(self, signal: SignalResult) -> str:
+        if signal.overall_signal in ("sell", "strong_sell"):
+            return "sell"
+        elif signal.overall_signal in ("buy", "strong_buy"):
+            return "buy"
+
+        regime = signal.regime
+        if regime and regime.regime in (MarketRegime.STRONG_TREND_UP, MarketRegime.TREND_UP):
+            return "buy"
+        if regime and regime.regime in (MarketRegime.STRONG_TREND_DOWN, MarketRegime.TREND_DOWN):
+            return "sell"
+
+        if signal.adx >= 25:
+            if signal.adx_plus_di > signal.adx_minus_di:
+                return "buy"
+            else:
+                return "sell"
+
+        if signal.rsi is not None and signal.rsi < 45:
+            return "buy"
+        elif signal.rsi is not None and signal.rsi > 55:
+            return "sell"
+        elif signal.ema_trend in ("bullish", "strong_bullish"):
+            return "buy"
+        elif signal.ema_trend in ("bearish", "strong_bearish"):
+            return "sell"
+        elif signal.macd_signal in ("bullish", "bullish_crossover"):
+            return "buy"
+        return "buy"
+
     async def run_cycle(self, exchange_id: str):
         self._cycle_count += 1
         symbols = self.get_symbols()
@@ -77,6 +108,8 @@ class BaseBot(ABC):
 
         trades_opened = 0
         trades_closed = 0
+        regime_rejections = 0
+        confirmation_rejections = 0
 
         for symbol in symbols:
             try:
@@ -91,27 +124,27 @@ class BaseBot(ABC):
                 has_open = any(t["symbol"] == symbol for t in self.active_trades)
                 if not has_open:
                     if await self.evaluate_entry(symbol, signal, sentiment_interp):
+                        side = self._determine_side(signal)
+
+                        confirmation = evaluate_confirmation(
+                            self.bot_type.value, signal, sentiment_interp, side,
+                        )
+
+                        if not confirmation.approved:
+                            self._last_scan_results[symbol] = (
+                                f"confirmation rejected: {confirmation.rejection_reason} "
+                                f"(score={confirmation.score:.1f}/{confirmation.required_score:.1f}, "
+                                f"regime={confirmation.regime})"
+                            )
+                            if "chaotic" in (confirmation.regime or ""):
+                                regime_rejections += 1
+                            else:
+                                confirmation_rejections += 1
+                            continue
+
                         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
                         entry_price = ticker["last"]
                         fee_rate = await self.exchange.get_trading_fee(exchange_id, symbol)
-
-                        if signal.overall_signal in ("sell", "strong_sell"):
-                            side = "sell"
-                        elif signal.overall_signal in ("buy", "strong_buy"):
-                            side = "buy"
-                        else:
-                            if signal.rsi is not None and signal.rsi < 45:
-                                side = "buy"
-                            elif signal.rsi is not None and signal.rsi > 55:
-                                side = "sell"
-                            elif signal.ema_trend in ("bullish", "strong_bullish"):
-                                side = "buy"
-                            elif signal.ema_trend in ("bearish", "strong_bearish"):
-                                side = "sell"
-                            elif signal.macd_signal in ("bullish", "bullish_crossover"):
-                                side = "buy"
-                            else:
-                                side = "buy"
 
                         assessment = await self.risk.assess_trade(
                             self.bot_type.value, entry_price, side,
@@ -119,11 +152,19 @@ class BaseBot(ABC):
                         )
 
                         if assessment.approved:
-                            await self.execute_trade(exchange_id, symbol, signal, assessment, fee_rate, side)
+                            await self.execute_trade(
+                                exchange_id, symbol, signal, assessment,
+                                fee_rate, side, confirmation,
+                            )
                             trades_opened += 1
-                            logger.info(f"{self.bot_type.value} TRADE OPENED: {side.upper()} {symbol} @ ${entry_price:.4f}")
+                            logger.info(
+                                f"{self.bot_type.value} TRADE OPENED: {side.upper()} {symbol} "
+                                f"@ ${entry_price:.4f} | regime={confirmation.regime} "
+                                f"score={confirmation.score:.1f}/{confirmation.required_score:.1f} "
+                                f"confs={len(confirmation.confirmations)}"
+                            )
                         else:
-                            self._last_scan_results[symbol] = f"rejected: {assessment.reasoning}"
+                            self._last_scan_results[symbol] = f"risk rejected: {assessment.reasoning}"
 
                 for trade in list(self.active_trades):
                     if trade["symbol"] != symbol:
@@ -163,12 +204,14 @@ class BaseBot(ABC):
             logger.info(
                 f"{self.bot_type.value} cycle #{self._cycle_count}: "
                 f"scanned {len(symbols)} symbols, opened {trades_opened}, "
-                f"closed {trades_closed}, active {len(self.active_trades)}"
+                f"closed {trades_closed}, active {len(self.active_trades)}, "
+                f"regime_blocked={regime_rejections}, conf_blocked={confirmation_rejections}"
             )
 
     async def execute_trade(
         self, exchange_id: str, symbol: str, signal: SignalResult,
         assessment: RiskAssessment, fee_rate: float, side: str,
+        confirmation: Optional[ConfirmationResult] = None,
     ):
         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
         amount = assessment.position_size_usd / ticker["last"]
@@ -178,6 +221,12 @@ class BaseBot(ABC):
         fill_price = order["price"]
         actual_fee = order["fee"]
         actual_fee_rate = order.get("fee_rate", fee_rate)
+
+        strategy_desc = ""
+        signal_score = signal.confirmation_score
+        if confirmation:
+            strategy_desc = confirmation.strategy_notes
+            signal_score = confirmation.score
 
         trade = {
             "order_id": order["id"],
@@ -196,6 +245,10 @@ class BaseBot(ABC):
             "reasoning": assessment.reasoning,
             "signal_confidence": signal.confidence,
             "bot_type": self.bot_type.value,
+            "regime": signal.regime.regime.value if signal.regime else "unknown",
+            "strategy": strategy_desc,
+            "signal_score": signal_score,
+            "confirmations": confirmation.confirmations if confirmation else [],
         }
         self.active_trades.append(trade)
 
@@ -216,12 +269,15 @@ class BaseBot(ABC):
             "bucket": self.bot_type.value,
             "reasoning": assessment.reasoning,
             "is_paper": True,
+            "regime": signal.regime.regime.value if signal.regime else "unknown",
+            "strategy": strategy_desc,
+            "signal_score": signal_score,
         })
 
         await store.hset(
             f"active_trades:{self.bot_type.value}",
             order["id"],
-            json.dumps(trade),
+            json.dumps(trade, default=str),
         )
 
         trade_store.record_snapshot()

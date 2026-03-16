@@ -1,5 +1,5 @@
 from app.bots.base import BaseBot
-from app.indicators.technical import SignalResult
+from app.indicators.technical import SignalResult, MarketRegime
 from app.models.trade import BotType
 
 
@@ -14,48 +14,69 @@ class ScalperBot(BaseBot):
         return self._get_all_tradable_symbols()
 
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
-        if signal.confidence < 0.05:
+        if signal.confidence < 0.1:
             return False
 
-        score = 0
+        regime = signal.regime
+        if regime and regime.regime == MarketRegime.CHAOTIC:
+            return False
 
-        if signal.overall_signal in ("buy", "strong_buy", "sell", "strong_sell"):
-            score += 1
+        if signal.overall_signal == "hold":
+            return False
+
+        score = 0.0
 
         if signal.rsi_signal in ("oversold", "overbought"):
-            score += 2
+            score += 2.0
         elif signal.rsi_signal in ("approaching_oversold", "approaching_overbought"):
-            score += 1
+            score += 0.5
 
         if signal.macd_signal in ("bullish_crossover", "bearish_crossover"):
-            score += 2
-        elif signal.macd_signal in ("bullish", "bearish"):
-            score += 1
+            score += 2.0
 
         if signal.bollinger_signal in ("oversold", "overbought"):
-            score += 1
+            score += 1.0
 
-        if signal.volume_trend == "high":
-            score += 1
+        if signal.volume_trend in ("high", "very_high"):
+            score += 1.0
 
-        if signal.ema_trend in ("bullish", "bearish", "strong_bullish", "strong_bearish"):
-            score += 1
+        if signal.adx >= 25:
+            score += 1.0
 
-        return score >= 2
+        if signal.psar_direction in ("bullish", "bearish"):
+            score += 0.5
+
+        if signal.stoch_rsi_k < 20 or signal.stoch_rsi_k > 80:
+            score += 0.5
+
+        if signal.mfi < 20 or signal.mfi > 80:
+            score += 0.5
+
+        if regime and regime.regime in (MarketRegime.RANGING,):
+            if signal.bollinger_signal in ("oversold", "overbought"):
+                score += 0.5
+            else:
+                score -= 1.0
+
+        return score >= 3.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
+        regime = signal.regime
+        if regime and regime.regime == MarketRegime.CHAOTIC:
+            return True
+
         if trade["side"] == "buy":
-            if signal.rsi_signal == "overbought":
+            if signal.rsi_signal == "overbought" and signal.macd_signal in ("bearish", "bearish_crossover"):
                 return True
-            if signal.macd_signal == "bearish_crossover":
+            if signal.psar_direction == "bearish" and signal.vortex_signal == "bearish":
                 return True
-            if signal.overall_signal in ("sell", "strong_sell"):
+            if signal.overall_signal in ("sell", "strong_sell") and signal.confirmation_score >= 4:
                 return True
         else:
-            if signal.rsi_signal == "oversold":
+            if signal.rsi_signal == "oversold" and signal.macd_signal in ("bullish", "bullish_crossover"):
                 return True
-            if signal.macd_signal == "bullish_crossover":
+            if signal.psar_direction == "bullish" and signal.vortex_signal == "bullish":
                 return True
-            if signal.overall_signal in ("buy", "strong_buy"):
+            if signal.overall_signal in ("buy", "strong_buy") and signal.confirmation_score >= 4:
                 return True
         return False

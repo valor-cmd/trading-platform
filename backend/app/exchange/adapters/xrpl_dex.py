@@ -28,12 +28,24 @@ XRPL_TOKENS = {
 }
 
 
-def _decode_hex_currency(hex_str: str) -> str:
+import re
+
+_VALID_SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,19}$")
+_VALID_SYMBOL_WITH_SUFFIX_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,14}(\.[A-Za-z0-9]{1,10})?$")
+
+
+def _is_valid_symbol(sym: str) -> bool:
+    return bool(sym and _VALID_SYMBOL_RE.match(sym) and all(ord(c) < 128 for c in sym))
+
+
+def _decode_hex_currency(hex_str: str) -> Optional[str]:
     try:
         decoded = bytes.fromhex(hex_str).rstrip(b"\x00").decode("ascii", errors="ignore").strip()
-        return decoded if decoded else hex_str[:6]
+        if decoded and _is_valid_symbol(decoded):
+            return decoded
+        return None
     except Exception:
-        return hex_str[:6]
+        return None
 
 
 class XRPLDEXAdapter(BaseExchangeAdapter):
@@ -105,16 +117,19 @@ class XRPLDEXAdapter(BaseExchangeAdapter):
                     else:
                         symbol = currency_raw[:10]
 
-                    if not symbol or symbol.startswith("0x"):
+                    if not symbol or not _is_valid_symbol(symbol):
                         continue
 
                     unique_sym = symbol
                     if unique_sym in self._seen_symbols:
                         if username:
-                            unique_sym = f"{symbol}.{username[:6].lower()}"
+                            suffix = re.sub(r"[^A-Za-z0-9]", "", username)[:6].lower()
                         else:
-                            unique_sym = f"{symbol}.{issuer_addr[-6:]}"
+                            suffix = issuer_addr[-6:]
+                        unique_sym = f"{symbol}.{suffix}"
                     if unique_sym in self._seen_symbols:
+                        continue
+                    if not _VALID_SYMBOL_WITH_SUFFIX_RE.match(unique_sym):
                         continue
                     self._seen_symbols.add(unique_sym)
 

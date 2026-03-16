@@ -2,7 +2,7 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.indicators.technical import TechnicalAnalyzer
+from app.indicators.technical import TechnicalAnalyzer, MarketRegime
 
 
 @dataclass
@@ -54,7 +54,8 @@ class BacktestEngine:
         risk_per_trade_pct: float = 2.0,
         sl_atr_multiplier: float = 1.5,
         tp_rr_ratio: float = 2.0,
-        min_confidence: float = 0.3,
+        min_confidence: float = 0.15,
+        min_confirmations: int = 3,
     ) -> BacktestResult:
         capital = initial_capital
         peak_capital = initial_capital
@@ -96,10 +97,21 @@ class BacktestEngine:
                 elif hit_tp:
                     exit_price = position["take_profit"]
                     exit_reason = "take_profit"
-                elif position["side"] == "buy" and signal.overall_signal in ("sell", "strong_sell"):
-                    exit_reason = "signal_reversal"
-                elif position["side"] == "sell" and signal.overall_signal in ("buy", "strong_buy"):
-                    exit_reason = "signal_reversal"
+                else:
+                    regime = signal.regime
+                    if regime and regime.regime == MarketRegime.CHAOTIC:
+                        exit_reason = "regime_exit"
+
+                    if position["side"] == "buy":
+                        if signal.overall_signal == "strong_sell" and signal.confirmation_score >= 4:
+                            exit_reason = "signal_reversal"
+                        elif signal.psar_direction == "bearish" and signal.obv_trend == "bearish" and signal.adx >= 25:
+                            exit_reason = "trend_reversal"
+                    elif position["side"] == "sell":
+                        if signal.overall_signal == "strong_buy" and signal.confirmation_score >= 4:
+                            exit_reason = "signal_reversal"
+                        elif signal.psar_direction == "bullish" and signal.obv_trend == "bullish" and signal.adx >= 25:
+                            exit_reason = "trend_reversal"
 
                 if exit_reason:
                     if position["side"] == "buy":
@@ -135,18 +147,72 @@ class BacktestEngine:
                     max_drawdown = max(max_drawdown, drawdown)
                     position = None
 
-            elif signal.confidence >= min_confidence and signal.overall_signal in (
-                "buy", "strong_buy", "sell", "strong_sell"
-            ):
-                entry_price = df.iloc[i]["close"]
-                atr = signal.atr
+            elif signal.overall_signal in ("buy", "strong_buy", "sell", "strong_sell"):
+                regime = signal.regime
+
+                if regime and regime.regime == MarketRegime.CHAOTIC:
+                    continue
+
+                if signal.confidence < min_confidence:
+                    continue
+
+                if len(signal.confirmations) < min_confirmations:
+                    continue
+
+                if signal.adx < 15 and signal.overall_signal not in ("strong_buy", "strong_sell"):
+                    continue
 
                 if signal.overall_signal in ("buy", "strong_buy"):
                     side = "buy"
+                else:
+                    side = "sell"
+
+                directional_ok = False
+                if side == "buy":
+                    bull_inds = 0
+                    if signal.ema_trend in ("bullish", "strong_bullish"):
+                        bull_inds += 1
+                    if signal.macd_signal in ("bullish", "bullish_crossover"):
+                        bull_inds += 1
+                    if signal.psar_direction == "bullish":
+                        bull_inds += 1
+                    if signal.obv_trend == "bullish":
+                        bull_inds += 1
+                    if signal.rsi_signal in ("oversold", "approaching_oversold"):
+                        bull_inds += 1
+                    directional_ok = bull_inds >= 3
+                else:
+                    bear_inds = 0
+                    if signal.ema_trend in ("bearish", "strong_bearish"):
+                        bear_inds += 1
+                    if signal.macd_signal in ("bearish", "bearish_crossover"):
+                        bear_inds += 1
+                    if signal.psar_direction == "bearish":
+                        bear_inds += 1
+                    if signal.obv_trend == "bearish":
+                        bear_inds += 1
+                    if signal.rsi_signal in ("overbought", "approaching_overbought"):
+                        bear_inds += 1
+                    directional_ok = bear_inds >= 3
+
+                if not directional_ok:
+                    continue
+
+                if regime and regime.regime == MarketRegime.RANGING:
+                    if not (signal.bollinger_signal in ("oversold", "overbought") and signal.rsi_signal in ("oversold", "overbought")):
+                        continue
+
+                if regime and regime.regime == MarketRegime.VOLATILE:
+                    if signal.confirmation_score < 5.0:
+                        continue
+
+                entry_price = df.iloc[i]["close"]
+                atr = signal.atr
+
+                if side == "buy":
                     sl = entry_price - (atr * sl_atr_multiplier)
                     tp = entry_price + (atr * sl_atr_multiplier * tp_rr_ratio)
                 else:
-                    side = "sell"
                     sl = entry_price + (atr * sl_atr_multiplier)
                     tp = entry_price - (atr * sl_atr_multiplier * tp_rr_ratio)
 

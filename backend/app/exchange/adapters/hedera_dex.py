@@ -11,7 +11,15 @@ from app.exchange.adapters.base import (
 )
 from app.exchange.live_prices import live_prices
 
+import re
+
 logger = logging.getLogger(__name__)
+
+_VALID_SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,19}$")
+
+
+def _is_valid_symbol(sym: str) -> bool:
+    return bool(sym and _VALID_SYMBOL_RE.match(sym) and all(ord(c) < 128 for c in sym))
 
 HEDERA_MIRROR_NODE = "https://mainnet.mirrornode.hedera.com"
 SAUCERSWAP_API = "https://api.saucerswap.finance"
@@ -128,7 +136,7 @@ class HederaDEXAdapter(BaseExchangeAdapter):
                             decimals = int(t.get("decimals", "8") or "8")
                             if not token_id or not sym or token_id in self._token_id_to_symbol:
                                 continue
-                            if len(sym) > 20 or sym.startswith("0x"):
+                            if not _is_valid_symbol(sym):
                                 continue
                             token_info = TokenInfo(
                                 symbol=sym, name=name, chain=Chain.HEDERA,
