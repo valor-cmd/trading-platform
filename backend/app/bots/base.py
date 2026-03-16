@@ -291,6 +291,7 @@ class BaseBot(ABC):
 
         exit_price = exit_order["price"]
         exit_fee = exit_order["fee"]
+        exit_slippage = exit_order.get("slippage_usd", 0)
         entry_fee = trade.get("entry_fee_usd", 0)
 
         if trade["side"] == "buy":
@@ -310,6 +311,7 @@ class BaseBot(ABC):
                 trade_store.close_trade(
                     ot["id"], exit_price, round(net_pnl, 5),
                     round(exit_fee, 5), status,
+                    exit_slippage_usd=round(exit_slippage, 8),
                 )
                 break
 

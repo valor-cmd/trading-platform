@@ -122,13 +122,14 @@ class TradeStore:
         self._save()
         return trade
 
-    def close_trade(self, trade_id: int, exit_price: float, pnl_usd: float, exit_fee: float, status: str = "closed") -> Optional[dict]:
+    def close_trade(self, trade_id: int, exit_price: float, pnl_usd: float, exit_fee: float, status: str = "closed", exit_slippage_usd: float = 0) -> Optional[dict]:
         for t in self.trades:
             if t["id"] == trade_id:
                 t["exit_price"] = exit_price
                 t["pnl_usd"] = pnl_usd
                 t["pnl_pct"] = (pnl_usd / (t["entry_price"] * t["quantity"])) * 100 if t.get("quantity") and t.get("entry_price") else 0
                 t["exit_fee_usd"] = exit_fee
+                t["exit_slippage_usd"] = exit_slippage_usd
                 t["status"] = status
                 t["closed_at"] = datetime.now(timezone.utc).isoformat()
                 self._running_balance += pnl_usd
@@ -270,6 +271,7 @@ class TradeStore:
             })
         for t in self.trades:
             entry_fee = t.get("entry_fee_usd", 0)
+            entry_slippage = t.get("slippage_usd", 0)
             ledger.append({
                 "type": "trade_entry",
                 "timestamp": t.get("opened_at", ""),
@@ -277,7 +279,8 @@ class TradeStore:
                 "asset": t.get("symbol", ""),
                 "amount_usd": -(t.get("entry_price", 0) * t.get("quantity", 0)),
                 "pnl_usd": None,
-                "fee_usd": entry_fee,
+                "fee_usd": entry_fee + entry_slippage,
+                "slippage_usd": entry_slippage,
                 "running_balance": t.get("balance_at_entry"),
                 "side": t.get("side", "buy"),
                 "symbol": t.get("symbol"),
@@ -289,6 +292,7 @@ class TradeStore:
             })
             if t.get("status") in ("closed", "stopped_out"):
                 exit_fee = t.get("exit_fee_usd", 0)
+                exit_slippage = t.get("exit_slippage_usd", 0)
                 pnl = t.get("pnl_usd", 0)
                 ledger.append({
                     "type": "trade_exit",
@@ -297,7 +301,8 @@ class TradeStore:
                     "asset": t.get("symbol", ""),
                     "amount_usd": t.get("exit_price", 0) * t.get("quantity", 0),
                     "pnl_usd": pnl,
-                    "fee_usd": exit_fee,
+                    "fee_usd": exit_fee + exit_slippage,
+                    "slippage_usd": exit_slippage,
                     "running_balance": t.get("balance_at_exit"),
                     "side": "sell" if t.get("side") == "buy" else "buy",
                     "symbol": t.get("symbol"),

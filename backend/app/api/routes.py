@@ -286,6 +286,26 @@ async def record_withdrawal(req: WithdrawalRequest, _auth=Depends(require_auth))
     }
 
 
+@router.post("/accounting/reset")
+async def reset_account(_auth=Depends(require_auth)):
+    paper_exchange.balances = {"USDT": 0.0}
+    paper_exchange._save()
+    trade_store.trades.clear()
+    trade_store.deposits.clear()
+    trade_store.withdrawals.clear()
+    trade_store.snapshots.clear()
+    trade_store._running_balance = 0.0
+    trade_store.snapshots.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "balance": 0.0,
+        "open_trades": 0,
+        "total_trades": 0,
+    })
+    trade_store._save()
+    await risk_engine.rebalance_buckets(0, {})
+    return {"status": "reset", "balance": 0.0}
+
+
 @router.get("/accounting/summary")
 async def get_accounting_summary():
     data = trade_store.full_accounting()

@@ -57,6 +57,8 @@ export const recordWithdrawal = (data: {
   asset_amount: number;
 }) => api.post("/accounting/withdrawal", data);
 
+export const resetAccount = () => api.post("/accounting/reset");
+
 export const rebalanceBuckets = (totalCapital?: number) =>
   api.post("/risk/rebalance", { total_capital: totalCapital ?? null });
 

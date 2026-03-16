@@ -7,7 +7,7 @@ import {
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
-  getLiveBalance,
+  getLiveBalance, resetAccount,
 } from "../services/api";
 
 interface Summary {
@@ -473,6 +473,15 @@ function Dashboard() {
         <div className="action-btn" onClick={handleRebalance} style={{ cursor: "pointer" }}>
           <div className="action-btn-circle">⟳</div>
           <span className="action-btn-label">{rebalanceMsg || "Rebalance"}</span>
+        </div>
+        <div className="action-btn" onClick={async () => {
+          if (window.confirm("Reset account to zero? This clears all trades, deposits, and balance.")) {
+            await resetAccount();
+            await load();
+          }
+        }} style={{ cursor: "pointer" }}>
+          <div className="action-btn-circle" style={{ color: "#ff4d6a" }}>✕</div>
+          <span className="action-btn-label">Reset</span>
         </div>
         <div className="action-btn" onClick={() => navigate("/accounting")} style={{ cursor: "pointer" }}>
           <div className="action-btn-circle">⋯</div>
