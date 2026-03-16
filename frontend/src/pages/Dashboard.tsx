@@ -124,7 +124,7 @@ function Dashboard() {
 
   const load = async () => {
     try {
-      const [s, r, b, p, , ar, lb] = await Promise.all([
+      const results = await Promise.allSettled([
         getAccountingSummary(),
         getRiskStatus(),
         getBotStatus(),
@@ -133,15 +133,22 @@ function Dashboard() {
         getArbStatus(),
         getLiveBalance(),
       ]);
-      setSummary(s.data);
-      setRisk(r.data);
-      setBots(b.data);
-      setArbStatus(ar.data);
-      setLiveBalance(lb.data);
+      const val = (i: number) => results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<any>).value : null;
+      const s = val(0);
+      const r = val(1);
+      const b = val(2);
+      const p = val(3);
+      const ar = val(5);
+      const lb = val(6);
+      if (s) setSummary(s.data);
+      if (r) setRisk(r.data);
+      if (b) setBots(b.data);
+      if (ar) setArbStatus(ar.data);
+      if (lb) setLiveBalance(lb.data);
 
-      const chartPoints: { timestamp: string; balance: number }[] = p.data?.chart ?? p.data ?? [];
-      const tradeEvents: TradeEvent[] = p.data?.trades ?? [];
-      const depositEvents: { timestamp: string; type: string }[] = p.data?.events ?? [];
+      const chartPoints: { timestamp: string; balance: number }[] = p?.data?.chart ?? p?.data ?? [];
+      const tradeEvents: TradeEvent[] = p?.data?.trades ?? [];
+      const depositEvents: { timestamp: string; type: string }[] = p?.data?.events ?? [];
 
       const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit"; used: boolean; tradeEvent?: TradeEvent }[] = [];
       const teMap: Record<string, TradeEvent> = {};

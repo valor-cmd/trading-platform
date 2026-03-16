@@ -1,11 +1,15 @@
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, field_validator
+import asyncio
+import json
+import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-from app.core.security import require_auth
-import json
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, field_validator
 
-from datetime import datetime, timezone
+from app.core.security import require_auth
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.core.store import store, trade_store
@@ -15,27 +19,57 @@ from app.risk.engine import RiskEngine
 from app.backtesting.engine import BacktestEngine
 
 
-async def _fetch_prices_batch(symbols: list[str]) -> dict[str, float]:
+async def _fetch_prices_batch(symbols: list[str], timeout_sec: float = 8.0) -> dict[str, float]:
+    if not symbols:
+        return {}
+
     by_exchange: dict[str, list[str]] = {}
     for sym in symbols:
         ex = paper_exchange._resolve_exchange(sym)
         by_exchange.setdefault(ex, []).append(sym)
 
     prices: dict[str, float] = {}
+
+    for sym in symbols:
+        ex = paper_exchange._resolve_exchange(sym)
+        cache_key = f"{ex}:{sym}"
+        cached = live_prices._ticker_cache.get(cache_key)
+        if cached and cached.get("last", 0) > 0:
+            prices[sym] = cached["last"]
+
+    missing_by_ex: dict[str, list[str]] = {}
     for ex, syms in by_exchange.items():
+        missing = [s for s in syms if s not in prices]
+        if missing:
+            missing_by_ex[ex] = missing
+
+    if not missing_by_ex:
+        return prices
+
+    async def _fetch_one_exchange(ex: str, syms: list[str]):
         try:
-            batch = await live_prices.fetch_tickers_batch(ex, syms)
+            batch = await asyncio.wait_for(
+                live_prices.fetch_tickers_batch(ex, syms[:50]),
+                timeout=timeout_sec,
+            )
             for sym, ticker in batch.items():
                 if ticker.get("last", 0) > 0:
                     prices[sym] = ticker["last"]
-        except Exception:
-            pass
-        for sym in syms:
-            if sym not in prices:
-                cache_key = f"{ex}:{sym}"
-                cached = live_prices._ticker_cache.get(cache_key)
-                if cached and cached.get("last", 0) > 0:
-                    prices[sym] = cached["last"]
+        except asyncio.TimeoutError:
+            logger.warning(f"Price fetch timeout for {ex} ({len(syms)} symbols)")
+        except Exception as e:
+            logger.debug(f"Price fetch failed for {ex}: {e}")
+
+    tasks = [_fetch_one_exchange(ex, syms) for ex, syms in missing_by_ex.items()]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    for sym in symbols:
+        if sym not in prices:
+            for t in trade_store.trades:
+                if t.get("symbol") == sym and t.get("entry_price", 0) > 0:
+                    prices[sym] = t["entry_price"]
+                    break
+
     return prices
 
 
@@ -50,18 +84,27 @@ async def _calc_open_position_value(open_trades: list[dict], prices: dict[str, f
 
 
 async def _record_live_snapshot():
-    usdt = paper_exchange.balances.get("USDT", 0)
-    open_trades = trade_store.get_open_trades()
-    symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-    prices = await _fetch_prices_batch(symbols)
-    open_pos_value = await _calc_open_position_value(open_trades, prices)
-    live_balance = usdt + open_pos_value
-    trade_store.snapshots.append({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "balance": round(live_balance, 5),
-        "open_trades": len(open_trades),
-        "total_trades": len(trade_store.trades),
-    })
+    try:
+        usdt = paper_exchange.balances.get("USDT", 0)
+        open_trades = trade_store.get_open_trades()
+        symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
+        prices = await _fetch_prices_batch(symbols, timeout_sec=5.0)
+        open_pos_value = await _calc_open_position_value(open_trades, prices)
+        live_balance = usdt + open_pos_value
+        trade_store.snapshots.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "balance": round(live_balance, 5),
+            "open_trades": len(open_trades),
+            "total_trades": len(trade_store.trades),
+        })
+    except Exception as e:
+        logger.warning(f"Snapshot recording failed: {e}")
+        trade_store.snapshots.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "balance": round(paper_exchange.balances.get("USDT", 0), 5),
+            "open_trades": len(trade_store.get_open_trades()),
+            "total_trades": len(trade_store.trades),
+        })
 
 router = APIRouter()
 
@@ -235,7 +278,10 @@ async def get_accounting_summary():
     usdt = paper_exchange.balances.get("USDT", 0)
     open_trades = trade_store.get_open_trades()
     symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-    prices = await _fetch_prices_batch(symbols)
+    try:
+        prices = await _fetch_prices_batch(symbols, timeout_sec=8.0)
+    except Exception:
+        prices = {}
     open_pos_value = await _calc_open_position_value(open_trades, prices)
     live_total = usdt + open_pos_value
     deps = data["summary"]["total_deposits_usd"]
@@ -282,7 +328,10 @@ async def get_trades_with_balance():
 async def get_active_trades_live():
     open_trades = trade_store.get_open_trades()
     symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-    prices = await _fetch_prices_batch(symbols)
+    try:
+        prices = await _fetch_prices_batch(symbols, timeout_sec=8.0)
+    except Exception:
+        prices = {}
     result = []
     for t in open_trades:
         symbol = t.get("symbol", "")
@@ -328,7 +377,10 @@ async def get_live_balance():
     usdt = balance["total"].get("USDT", 0)
     open_trades = trade_store.get_open_trades()
     symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-    prices = await _fetch_prices_batch(symbols)
+    try:
+        prices = await _fetch_prices_batch(symbols, timeout_sec=8.0)
+    except Exception:
+        prices = {}
     open_position_value = await _calc_open_position_value(open_trades, prices)
     return {
         "cash_balance_usd": round(usdt, 5),

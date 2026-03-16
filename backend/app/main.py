@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
                 usdt = paper_exchange.balances.get("USDT", 0)
                 open_trades = trade_store.get_open_trades()
                 symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-                prices = await _fetch_prices_batch(symbols)
+                prices = await _fetch_prices_batch(symbols, timeout_sec=5.0)
                 open_pos_value = await _calc_open_position_value(open_trades, prices)
                 live_balance = usdt + open_pos_value
                 trade_store.snapshots.append({
@@ -323,7 +323,10 @@ async def portfolio_chart(limit: int = 200):
     usdt = paper_exchange.balances.get("USDT", 0)
     open_trades = trade_store.get_open_trades()
     symbols = list({t.get("symbol", "") for t in open_trades if t.get("symbol")})
-    prices = await _fetch_prices_batch(symbols)
+    try:
+        prices = await _fetch_prices_batch(symbols, timeout_sec=8.0)
+    except Exception:
+        prices = {}
     open_pos_value = await _calc_open_position_value(open_trades, prices)
     now_balance = round(usdt + open_pos_value, 5)
     data.append({
