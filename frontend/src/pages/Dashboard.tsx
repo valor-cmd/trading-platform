@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Scatter, Cell, Brush,
+  CartesianGrid, Scatter, Cell, Brush, Bar,
 } from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
@@ -76,27 +76,109 @@ interface RiskStatus {
   };
 }
 
-const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number; dataKey: string }[]; label?: string }) => {
+interface OHLCCandle {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  ohlcRange: [number, number];
+  buy?: number;
+  sell?: number;
+  deposit?: number;
+}
+
+const INTERVAL_MS: Record<string, number> = {
+  "1M": 60_000, "5M": 300_000, "15M": 900_000, "1H": 3_600_000,
+  "4H": 14_400_000, "1D": 86_400_000, "1W": 604_800_000,
+};
+
+function aggregateToCandles(
+  data: { timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[],
+  intervalMs: number,
+): OHLCCandle[] {
+  if (data.length === 0) return [];
+  const candles: OHLCCandle[] = [];
+  let bucketStart = Math.floor(new Date(data[0].timestamp).getTime() / intervalMs) * intervalMs;
+  let o = data[0].balance, h = o, l = o, c = o;
+  let hasBuy = false, hasSell = false, hasDeposit = false;
+  for (const pt of data) {
+    const bucket = Math.floor(new Date(pt.timestamp).getTime() / intervalMs) * intervalMs;
+    if (bucket !== bucketStart) {
+      candles.push({
+        timestamp: new Date(bucketStart).toISOString(), open: o, high: h, low: l, close: c,
+        ohlcRange: [Math.min(o, c), Math.max(o, c)],
+        buy: hasBuy ? c : undefined, sell: hasSell ? c : undefined, deposit: hasDeposit ? c : undefined,
+      });
+      bucketStart = bucket; o = c; h = pt.balance; l = pt.balance;
+      hasBuy = false; hasSell = false; hasDeposit = false;
+    }
+    h = Math.max(h, pt.balance); l = Math.min(l, pt.balance); c = pt.balance;
+    if (pt.buy != null) hasBuy = true;
+    if (pt.sell != null) hasSell = true;
+    if (pt.deposit != null) hasDeposit = true;
+  }
+  candles.push({
+    timestamp: new Date(bucketStart).toISOString(), open: o, high: h, low: l, close: c,
+    ohlcRange: [Math.min(o, c), Math.max(o, c)],
+    buy: hasBuy ? c : undefined, sell: hasSell ? c : undefined, deposit: hasDeposit ? c : undefined,
+  });
+  return candles;
+}
+
+const CandlestickBar = (props: any) => {
+  const { x, y, width, height, payload } = props;
+  if (!payload || !payload.high || !payload.low) return null;
+  const { open, high, low, close } = payload;
+  const isUp = close >= open;
+  const color = isUp ? "#00ff88" : "#ff4d6a";
+  const range = high - low || 1;
+  const chartBottom = y + height;
+  const scale = (v: number) => chartBottom - ((v - low) / range) * height;
+  const bodyTop = scale(Math.max(open, close));
+  const bodyBot = scale(Math.min(open, close));
+  const bodyH = Math.max(bodyBot - bodyTop, 1);
+  const cx = x + width / 2;
+  const bw = Math.max(width * 0.6, 3);
+  return (
+    <g>
+      <line x1={cx} y1={scale(high)} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
+      <line x1={cx} y1={bodyBot} x2={cx} y2={scale(low)} stroke={color} strokeWidth={1} />
+      <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} fillOpacity={isUp ? 0.3 : 0.8} stroke={color} strokeWidth={1} rx={1} />
+    </g>
+  );
+};
+
+const CustomTooltip = ({ active, payload, label, chartMode }: { active?: boolean; payload?: any[]; label?: string; chartMode?: string }) => {
   if (active && payload?.length) {
     const ts = label ? new Date(label).toLocaleString() : "";
-    const balanceEntry = payload.find((p) => p.dataKey === "balance");
-    const buyEntry = payload.find((p) => p.dataKey === "buy" && p.value != null);
-    const sellEntry = payload.find((p) => p.dataKey === "sell" && p.value != null);
+    const raw = payload[0]?.payload;
+    if (chartMode === "candle" && raw?.open != null) {
+      const isUp = raw.close >= raw.open;
+      return (
+        <div style={{ background: "#1e1e1e", border: "1px solid #222", borderRadius: 12, padding: "8px 12px", fontSize: "0.8rem" }}>
+          <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{ts}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0 8px" }}>
+            <span style={{ color: "#888" }}>O:</span><span style={{ color: isUp ? "#00ff88" : "#ff4d6a" }}>${raw.open.toFixed(5)}</span>
+            <span style={{ color: "#888" }}>H:</span><span style={{ color: "#00ff88" }}>${raw.high.toFixed(5)}</span>
+            <span style={{ color: "#888" }}>L:</span><span style={{ color: "#ff4d6a" }}>${raw.low.toFixed(5)}</span>
+            <span style={{ color: "#888" }}>C:</span><span style={{ color: isUp ? "#00ff88" : "#ff4d6a", fontWeight: 600 }}>${raw.close.toFixed(5)}</span>
+          </div>
+        </div>
+      );
+    }
+    const balanceEntry = payload.find((p: any) => p.dataKey === "balance");
+    const buyEntry = payload.find((p: any) => p.dataKey === "buy" && p.value != null);
+    const sellEntry = payload.find((p: any) => p.dataKey === "sell" && p.value != null);
     return (
-      <div style={{
-        background: "#1e1e1e",
-        border: "1px solid #222",
-        borderRadius: 12,
-        padding: "8px 12px",
-        fontSize: "0.8rem",
-      }}>
+      <div style={{ background: "#1e1e1e", border: "1px solid #222", borderRadius: 12, padding: "8px 12px", fontSize: "0.8rem" }}>
         <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{ts}</div>
         <div style={{ color: "#00ff88", fontWeight: 600 }}>
-          ${balanceEntry?.value?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "—"}
+          ${balanceEntry?.value?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "--"}
         </div>
         {buyEntry && <div style={{ color: "#00ff88", fontSize: "0.7rem", marginTop: 2 }}>BUY</div>}
         {sellEntry && <div style={{ color: "#ff4d6a", fontSize: "0.7rem", marginTop: 2 }}>SELL</div>}
-        {payload.find((p) => p.dataKey === "deposit" && p.value != null) && (
+        {payload.find((p: any) => p.dataKey === "deposit" && p.value != null) && (
           <div style={{ color: "#ff9f1c", fontSize: "0.7rem", marginTop: 2 }}>DEPOSIT</div>
         )}
       </div>
@@ -120,6 +202,7 @@ function Dashboard() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [rebalanceMsg, setRebalanceMsg] = useState("");
   const [showTradeDots, setShowTradeDots] = useState(true);
+  const [chartMode, setChartMode] = useState<"line" | "candle">("line");
   const [selectedTrade, setSelectedTrade] = useState<TradeEvent | null>(null);
   const [tradeEventsMap, setTradeEventsMap] = useState<Record<string, TradeEvent>>({});
 
@@ -289,6 +372,7 @@ function Dashboard() {
   };
 
   const filteredChart = filterChartByRange(chartData, timeRange);
+  const candleData = aggregateToCandles(filteredChart, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
   const s = summary?.summary;
   const netPnl = s?.net_pnl_usd ?? 0;
   const pnlPositive = netPnl >= 0;
@@ -337,7 +421,7 @@ function Dashboard() {
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={filteredChart} margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
+            <ComposedChart data={chartMode === "candle" ? candleData : filteredChart} margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
               <defs>
                 <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0.2} />
@@ -364,7 +448,7 @@ function Dashboard() {
                 padding={{ top: 10, bottom: 10 }}
                 tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<CustomTooltip chartMode={chartMode} />} />
               <Brush
                 dataKey="timestamp"
                 height={20}
@@ -375,14 +459,18 @@ function Dashboard() {
                   return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
                 }}
               />
-              <Area
-                type="monotone"
-                dataKey="balance"
-                stroke={pnlPositive ? "#00ff88" : "#ff4d6a"}
-                strokeWidth={2}
-                fill="url(#pnlGrad)"
-                dot={false}
-              />
+              {chartMode === "line" ? (
+                <Area
+                  type="monotone"
+                  dataKey="balance"
+                  stroke={pnlPositive ? "#00ff88" : "#ff4d6a"}
+                  strokeWidth={2}
+                  fill="url(#pnlGrad)"
+                  dot={false}
+                />
+              ) : (
+                <Bar dataKey="ohlcRange" shape={<CandlestickBar />} isAnimationActive={false} />
+              )}
               {showTradeDots && (
                 <Scatter dataKey="buy" shape="circle" fill="#00ff88" isAnimationActive={false}
                   onClick={(_: unknown, idx: number) => {
@@ -445,6 +533,20 @@ function Dashboard() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setChartMode(chartMode === "line" ? "candle" : "line")}
+            style={{
+              padding: "0.35rem 0.75rem",
+              fontSize: "0.7rem",
+              background: chartMode === "candle" ? "rgba(255,255,255,0.1)" : "transparent",
+              border: "1px solid #444",
+              borderRadius: 20,
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            {chartMode === "line" ? "Line" : "Candle"}
+          </button>
           <button
             onClick={() => setShowTradeDots(!showTradeDots)}
             style={{
@@ -750,19 +852,19 @@ function Dashboard() {
             <div style={{ borderTop: "1px solid #333", paddingTop: "0.75rem" }}>
               {[
                 { label: "Time", value: new Date(selectedTrade.timestamp).toLocaleString() },
-                { label: "Price", value: `$${selectedTrade.price?.toLocaleString("en", { maximumFractionDigits: 8 }) ?? "—"}` },
-                { label: "Quantity", value: selectedTrade.quantity?.toFixed(6) ?? "—" },
+                { label: "Price", value: `$${selectedTrade.price?.toLocaleString("en", { maximumFractionDigits: 8 }) ?? "--"}` },
+                { label: "Quantity", value: selectedTrade.quantity?.toFixed(6) ?? "--" },
                 ...(selectedTrade.type === "entry" ? [
                   { label: "Stop Loss", value: selectedTrade.stop_loss ? `$${selectedTrade.stop_loss.toLocaleString("en", { maximumFractionDigits: 8 })}` : "None", cls: "negative" },
                   { label: "Take Profit", value: selectedTrade.take_profit ? `$${selectedTrade.take_profit.toLocaleString("en", { maximumFractionDigits: 8 })}` : "None", cls: "positive" },
-                  { label: "Entry Fee", value: selectedTrade.entry_fee != null ? `$${selectedTrade.entry_fee.toFixed(5)}` : "—" },
-                  { label: "Signal Score", value: selectedTrade.signal_score != null ? String(selectedTrade.signal_score) : "—" },
+                  { label: "Entry Fee", value: selectedTrade.entry_fee != null ? `$${selectedTrade.entry_fee.toFixed(5)}` : "--" },
+                  { label: "Signal Score", value: selectedTrade.signal_score != null ? String(selectedTrade.signal_score) : "--" },
                 ] : [
-                  { label: "Entry Price", value: selectedTrade.entry_price ? `$${selectedTrade.entry_price.toLocaleString("en", { maximumFractionDigits: 8 })}` : "—" },
-                  { label: "P&L", value: selectedTrade.pnl_usd != null ? `${selectedTrade.pnl_usd >= 0 ? "+" : ""}$${selectedTrade.pnl_usd.toFixed(5)}` : "—", cls: (selectedTrade.pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
-                  { label: "P&L %", value: selectedTrade.pnl_pct != null ? `${selectedTrade.pnl_pct >= 0 ? "+" : ""}${selectedTrade.pnl_pct}%` : "—", cls: (selectedTrade.pnl_pct ?? 0) >= 0 ? "positive" : "negative" },
-                  { label: "Exit Fee", value: selectedTrade.exit_fee != null ? `$${selectedTrade.exit_fee.toFixed(5)}` : "—" },
-                  { label: "Exit Reason", value: selectedTrade.exit_reason ? selectedTrade.exit_reason.replace("_", " ") : "—",
+                  { label: "Entry Price", value: selectedTrade.entry_price ? `$${selectedTrade.entry_price.toLocaleString("en", { maximumFractionDigits: 8 })}` : "--" },
+                  { label: "P&L", value: selectedTrade.pnl_usd != null ? `${selectedTrade.pnl_usd >= 0 ? "+" : ""}$${selectedTrade.pnl_usd.toFixed(5)}` : "--", cls: (selectedTrade.pnl_usd ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "P&L %", value: selectedTrade.pnl_pct != null ? `${selectedTrade.pnl_pct >= 0 ? "+" : ""}${selectedTrade.pnl_pct}%` : "--", cls: (selectedTrade.pnl_pct ?? 0) >= 0 ? "positive" : "negative" },
+                  { label: "Exit Fee", value: selectedTrade.exit_fee != null ? `$${selectedTrade.exit_fee.toFixed(5)}` : "--" },
+                  { label: "Exit Reason", value: selectedTrade.exit_reason ? selectedTrade.exit_reason.replace("_", " ") : "--",
                     cls: selectedTrade.exit_reason === "take_profit" ? "positive" : selectedTrade.exit_reason === "stop_loss" || selectedTrade.exit_reason === "stopped_out" ? "negative" : undefined },
                 ]),
                 ...(selectedTrade.strategy ? [{ label: "Strategy", value: selectedTrade.strategy }] : []),
