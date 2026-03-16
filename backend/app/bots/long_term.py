@@ -71,7 +71,7 @@ class LongTermBot(BaseBot):
             if signal.adx < 25:
                 score -= 0.5
 
-        return score >= 3.5
+        return score >= 5.5
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime

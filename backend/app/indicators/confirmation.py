@@ -21,39 +21,184 @@ class ConfirmationResult:
 
 REGIME_MIN_SCORES = {
     "scalper": {
-        MarketRegime.STRONG_TREND_UP: 4.0,
-        MarketRegime.TREND_UP: 4.5,
-        MarketRegime.TREND_DOWN: 4.5,
-        MarketRegime.STRONG_TREND_DOWN: 4.0,
-        MarketRegime.RANGING: 5.0,
-        MarketRegime.VOLATILE: 5.5,
+        MarketRegime.STRONG_TREND_UP: 5.0,
+        MarketRegime.TREND_UP: 5.5,
+        MarketRegime.TREND_DOWN: 5.5,
+        MarketRegime.STRONG_TREND_DOWN: 5.0,
+        MarketRegime.RANGING: 4.5,
+        MarketRegime.VOLATILE: 6.0,
         MarketRegime.CHAOTIC: 99.0,
     },
     "swing": {
-        MarketRegime.STRONG_TREND_UP: 3.5,
-        MarketRegime.TREND_UP: 4.0,
-        MarketRegime.TREND_DOWN: 4.0,
-        MarketRegime.STRONG_TREND_DOWN: 3.5,
-        MarketRegime.RANGING: 5.0,
-        MarketRegime.VOLATILE: 5.5,
+        MarketRegime.STRONG_TREND_UP: 5.0,
+        MarketRegime.TREND_UP: 5.5,
+        MarketRegime.TREND_DOWN: 5.5,
+        MarketRegime.STRONG_TREND_DOWN: 5.0,
+        MarketRegime.RANGING: 6.5,
+        MarketRegime.VOLATILE: 6.0,
         MarketRegime.CHAOTIC: 99.0,
     },
     "long_term": {
-        MarketRegime.STRONG_TREND_UP: 3.0,
-        MarketRegime.TREND_UP: 3.5,
-        MarketRegime.TREND_DOWN: 3.5,
-        MarketRegime.STRONG_TREND_DOWN: 3.0,
-        MarketRegime.RANGING: 4.5,
-        MarketRegime.VOLATILE: 5.0,
+        MarketRegime.STRONG_TREND_UP: 5.5,
+        MarketRegime.TREND_UP: 6.0,
+        MarketRegime.TREND_DOWN: 6.0,
+        MarketRegime.STRONG_TREND_DOWN: 5.5,
+        MarketRegime.RANGING: 7.0,
+        MarketRegime.VOLATILE: 6.5,
         MarketRegime.CHAOTIC: 99.0,
     },
 }
 
 MIN_CONFIRMATIONS = {
     "scalper": 3,
-    "swing": 3,
-    "long_term": 3,
+    "swing": 4,
+    "long_term": 5,
 }
+
+
+def _score_scalper(signal: SignalResult, side: str, confs: list) -> float:
+    s = 0.0
+    if side == "buy":
+        if signal.rsi_signal == "oversold":
+            s += 2.5; confs.append("RSI oversold")
+        elif signal.rsi_signal == "approaching_oversold":
+            s += 0.5
+        if signal.stoch_rsi_k < 15:
+            s += 2.0; confs.append(f"StochRSI extreme low {signal.stoch_rsi_k:.0f}")
+        elif signal.stoch_rsi_k < 25:
+            s += 1.0
+        if signal.bollinger_signal == "oversold":
+            s += 1.5; confs.append("BB oversold")
+        if signal.mfi < 20:
+            s += 1.5; confs.append("MFI extreme low")
+        elif signal.mfi < 35:
+            s += 0.5
+        if signal.williams_r < -85:
+            s += 1.0; confs.append("Williams %R extreme")
+        if signal.keltner_signal == "oversold":
+            s += 1.0; confs.append("Keltner oversold")
+        if signal.macd_signal == "bullish_crossover":
+            s += 1.0; confs.append("MACD bull cross")
+    else:
+        if signal.rsi_signal == "overbought":
+            s += 2.5; confs.append("RSI overbought")
+        elif signal.rsi_signal == "approaching_overbought":
+            s += 0.5
+        if signal.stoch_rsi_k > 85:
+            s += 2.0; confs.append(f"StochRSI extreme high {signal.stoch_rsi_k:.0f}")
+        elif signal.stoch_rsi_k > 75:
+            s += 1.0
+        if signal.bollinger_signal == "overbought":
+            s += 1.5; confs.append("BB overbought")
+        if signal.mfi > 80:
+            s += 1.5; confs.append("MFI extreme high")
+        elif signal.mfi > 65:
+            s += 0.5
+        if signal.williams_r > -15:
+            s += 1.0; confs.append("Williams %R extreme")
+        if signal.keltner_signal == "overbought":
+            s += 1.0; confs.append("Keltner overbought")
+        if signal.macd_signal == "bearish_crossover":
+            s += 1.0; confs.append("MACD bear cross")
+    if signal.volume_trend in ("high", "very_high"):
+        s += 1.0; confs.append(f"Volume {signal.volume_trend}")
+    return s
+
+
+def _score_swing(signal: SignalResult, side: str, confs: list) -> float:
+    s = 0.0
+    if side == "buy":
+        if signal.ema_trend == "strong_bullish":
+            s += 2.5; confs.append("Strong bullish EMA trend")
+        elif signal.ema_trend == "bullish":
+            s += 1.5; confs.append("Bullish EMA trend")
+        if signal.macd_signal == "bullish_crossover":
+            s += 2.5; confs.append("MACD bullish crossover")
+        elif signal.macd_signal == "bullish":
+            s += 0.75
+        if signal.adx >= 25 and signal.adx_plus_di > signal.adx_minus_di:
+            s += 2.0; confs.append(f"ADX {signal.adx:.0f} with +DI leading")
+        elif signal.adx >= 20:
+            s += 0.5
+        if signal.psar_direction == "bullish":
+            s += 1.0; confs.append("PSAR bullish")
+        if signal.vortex_signal == "bullish":
+            s += 1.0; confs.append("Vortex bullish")
+        if signal.obv_trend == "bullish":
+            s += 1.0; confs.append("OBV accumulation")
+        if signal.rsi_signal == "oversold":
+            s += 0.75
+    else:
+        if signal.ema_trend == "strong_bearish":
+            s += 2.5; confs.append("Strong bearish EMA trend")
+        elif signal.ema_trend == "bearish":
+            s += 1.5; confs.append("Bearish EMA trend")
+        if signal.macd_signal == "bearish_crossover":
+            s += 2.5; confs.append("MACD bearish crossover")
+        elif signal.macd_signal == "bearish":
+            s += 0.75
+        if signal.adx >= 25 and signal.adx_minus_di > signal.adx_plus_di:
+            s += 2.0; confs.append(f"ADX {signal.adx:.0f} with -DI leading")
+        elif signal.adx >= 20:
+            s += 0.5
+        if signal.psar_direction == "bearish":
+            s += 1.0; confs.append("PSAR bearish")
+        if signal.vortex_signal == "bearish":
+            s += 1.0; confs.append("Vortex bearish")
+        if signal.obv_trend == "bearish":
+            s += 1.0; confs.append("OBV distribution")
+        if signal.rsi_signal == "overbought":
+            s += 0.75
+    if signal.volume_trend in ("high", "very_high"):
+        s += 0.5; confs.append(f"Volume {signal.volume_trend}")
+    return s
+
+
+def _score_long_term(signal: SignalResult, side: str, confs: list) -> float:
+    s = 0.0
+    if side == "buy":
+        if signal.ema_trend == "strong_bullish":
+            s += 3.0; confs.append("Strong bullish macro trend")
+        elif signal.ema_trend == "bullish":
+            s += 1.5; confs.append("Bullish macro trend")
+        else:
+            s -= 2.0
+        if signal.adx >= 30:
+            s += 2.0; confs.append(f"Strong trend ADX={signal.adx:.0f}")
+        elif signal.adx >= 25:
+            s += 1.0
+        else:
+            s -= 1.0
+        if signal.rsi_signal == "oversold" and signal.macd_signal in ("bullish", "bullish_crossover"):
+            s += 2.0; confs.append("RSI oversold + MACD bullish convergence")
+        if signal.macd_signal == "bullish_crossover":
+            s += 1.5; confs.append("MACD bullish crossover")
+        if signal.obv_trend == "bullish":
+            s += 1.5; confs.append("OBV long-term accumulation")
+        if signal.psar_direction == "bullish" and signal.vortex_signal == "bullish":
+            s += 1.0; confs.append("PSAR+Vortex aligned bullish")
+    else:
+        if signal.ema_trend == "strong_bearish":
+            s += 3.0; confs.append("Strong bearish macro trend")
+        elif signal.ema_trend == "bearish":
+            s += 1.5; confs.append("Bearish macro trend")
+        else:
+            s -= 2.0
+        if signal.adx >= 30:
+            s += 2.0; confs.append(f"Strong trend ADX={signal.adx:.0f}")
+        elif signal.adx >= 25:
+            s += 1.0
+        else:
+            s -= 1.0
+        if signal.rsi_signal == "overbought" and signal.macd_signal in ("bearish", "bearish_crossover"):
+            s += 2.0; confs.append("RSI overbought + MACD bearish convergence")
+        if signal.macd_signal == "bearish_crossover":
+            s += 1.5; confs.append("MACD bearish crossover")
+        if signal.obv_trend == "bearish":
+            s += 1.5; confs.append("OBV long-term distribution")
+        if signal.psar_direction == "bearish" and signal.vortex_signal == "bearish":
+            s += 1.0; confs.append("PSAR+Vortex aligned bearish")
+    return s
 
 
 def evaluate_confirmation(
@@ -102,107 +247,32 @@ def evaluate_confirmation(
     else:
         relevant_confirmations = bearish_confirmations
 
-    directional_score = 0.0
-    if side == "buy":
-        if signal.rsi_signal in ("oversold",):
-            directional_score += 1.5
-        elif signal.rsi_signal == "approaching_oversold":
-            directional_score += 0.5
-        if signal.macd_signal == "bullish_crossover":
-            directional_score += 2.0
-        elif signal.macd_signal == "bullish":
-            directional_score += 0.5
-        if signal.bollinger_signal == "oversold":
-            directional_score += 1.0
-        if signal.ema_trend in ("strong_bullish",):
-            directional_score += 2.0
-        elif signal.ema_trend == "bullish":
-            directional_score += 1.0
-        if signal.adx >= 25 and signal.adx_plus_di > signal.adx_minus_di:
-            directional_score += 1.5
-        if signal.psar_direction == "bullish":
-            directional_score += 1.0
-        if signal.vortex_signal == "bullish":
-            directional_score += 0.75
-        if signal.obv_trend == "bullish":
-            directional_score += 0.75
-        if signal.mfi < 20:
-            directional_score += 1.0
-        elif signal.mfi < 40:
-            directional_score += 0.25
-        if signal.williams_r < -80:
-            directional_score += 0.5
-        if signal.stoch_rsi_k < 20:
-            directional_score += 0.75
-        if signal.keltner_signal == "oversold":
-            directional_score += 0.75
-    else:
-        if signal.rsi_signal in ("overbought",):
-            directional_score += 1.5
-        elif signal.rsi_signal == "approaching_overbought":
-            directional_score += 0.5
-        if signal.macd_signal == "bearish_crossover":
-            directional_score += 2.0
-        elif signal.macd_signal == "bearish":
-            directional_score += 0.5
-        if signal.bollinger_signal == "overbought":
-            directional_score += 1.0
-        if signal.ema_trend in ("strong_bearish",):
-            directional_score += 2.0
-        elif signal.ema_trend == "bearish":
-            directional_score += 1.0
-        if signal.adx >= 25 and signal.adx_minus_di > signal.adx_plus_di:
-            directional_score += 1.5
-        if signal.psar_direction == "bearish":
-            directional_score += 1.0
-        if signal.vortex_signal == "bearish":
-            directional_score += 0.75
-        if signal.obv_trend == "bearish":
-            directional_score += 0.75
-        if signal.mfi > 80:
-            directional_score += 1.0
-        elif signal.mfi > 60:
-            directional_score += 0.25
-        if signal.williams_r > -20:
-            directional_score += 0.5
-        if signal.stoch_rsi_k > 80:
-            directional_score += 0.75
-        if signal.keltner_signal == "overbought":
-            directional_score += 0.75
-
-    if signal.volume_trend in ("high", "very_high"):
-        directional_score += 0.5
-        relevant_confirmations.append(f"Volume {signal.volume_trend}")
+    directional_score = _score_scalper(signal, side, relevant_confirmations) if bot_type == "scalper" \
+        else _score_swing(signal, side, relevant_confirmations) if bot_type == "swing" \
+        else _score_long_term(signal, side, relevant_confirmations)
 
     sentiment_bias = sentiment.get("bias", "neutral")
     sentiment_weight = sentiment.get("weight", 0)
-    if bot_type in ("swing", "long_term"):
+    if bot_type == "long_term":
         if side == "buy" and sentiment_bias in ("contrarian_buy", "lean_buy"):
-            directional_score += sentiment_weight * (2.0 if bot_type == "long_term" else 1.0)
+            directional_score += sentiment_weight * 3.0
             relevant_confirmations.append(f"Sentiment {sentiment_bias} (weight={sentiment_weight:.1f})")
         elif side == "sell" and sentiment_bias in ("contrarian_sell", "lean_sell"):
-            directional_score += sentiment_weight * (2.0 if bot_type == "long_term" else 1.0)
+            directional_score += sentiment_weight * 3.0
             relevant_confirmations.append(f"Sentiment {sentiment_bias} (weight={sentiment_weight:.1f})")
+    elif bot_type == "swing":
+        if side == "buy" and sentiment_bias in ("contrarian_buy", "lean_buy"):
+            directional_score += sentiment_weight * 1.0
+            relevant_confirmations.append(f"Sentiment {sentiment_bias}")
+        elif side == "sell" and sentiment_bias in ("contrarian_sell", "lean_sell"):
+            directional_score += sentiment_weight * 1.0
+            relevant_confirmations.append(f"Sentiment {sentiment_bias}")
 
     regime_str = regime.regime.value
-    trending = regime.regime in (
-        MarketRegime.STRONG_TREND_UP, MarketRegime.TREND_UP,
-        MarketRegime.STRONG_TREND_DOWN, MarketRegime.TREND_DOWN,
-    )
     ranging = regime.regime == MarketRegime.RANGING
 
-    if trending and bot_type == "scalper":
-        if (side == "buy" and regime.regime in (MarketRegime.STRONG_TREND_UP, MarketRegime.TREND_UP)):
-            directional_score += 0.5
-        elif (side == "sell" and regime.regime in (MarketRegime.STRONG_TREND_DOWN, MarketRegime.TREND_DOWN)):
-            directional_score += 0.5
-
-    if ranging and bot_type == "scalper":
-        if signal.bollinger_signal in ("oversold", "overbought"):
-            directional_score += 0.5
-
     if ranging and bot_type in ("swing", "long_term"):
-        required += 0.5
+        required += 1.0
 
     min_confs = MIN_CONFIRMATIONS.get(bot_type, 3)
     has_enough_confirmations = len(relevant_confirmations) >= min_confs

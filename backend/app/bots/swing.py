@@ -71,7 +71,7 @@ class SwingBot(BaseBot):
             if signal.adx < 25:
                 score -= 1.0
 
-        return score >= 3.5
+        return score >= 5.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime

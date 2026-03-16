@@ -93,7 +93,7 @@ function Accounting() {
 
   const load = async () => {
     try {
-      const [s, b, l, at, f, lb] = await Promise.all([
+      const [s, b, l, at, f, lb] = await Promise.allSettled([
         getAccountingSummary(),
         getPnlByBot(),
         getLedger(),
@@ -101,12 +101,12 @@ function Accounting() {
         getFees(),
         getLiveBalance(),
       ]);
-      setSummary(s.data);
-      setByBot(b.data);
-      setLedger(Array.isArray(l.data) ? l.data : []);
-      setActiveTrades(Array.isArray(at.data) ? at.data : []);
-      setFees(f.data);
-      setLiveBalance(lb.data);
+      if (s.status === "fulfilled") setSummary(s.value.data);
+      if (b.status === "fulfilled") setByBot(b.value.data);
+      if (l.status === "fulfilled") setLedger(Array.isArray(l.value.data) ? l.value.data : []);
+      if (at.status === "fulfilled") setActiveTrades(Array.isArray(at.value.data) ? at.value.data : []);
+      if (f.status === "fulfilled") setFees(f.value.data);
+      if (lb.status === "fulfilled") setLiveBalance(lb.value.data);
     } catch {
       /* not connected */
     }

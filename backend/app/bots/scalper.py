@@ -58,7 +58,7 @@ class ScalperBot(BaseBot):
             else:
                 score -= 1.0
 
-        return score >= 3.0
+        return score >= 4.5
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime
