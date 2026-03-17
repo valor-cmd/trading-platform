@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Scatter, Cell, Brush, Bar,
+  CartesianGrid, Scatter, Cell, Bar, ReferenceArea,
 } from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
@@ -28,6 +28,8 @@ interface Summary {
   };
   win_rate: {
     total_trades: number;
+    closed_trades: number;
+    open_trades: number;
     winning_trades: number;
     losing_trades: number;
     win_rate: number;
@@ -205,6 +207,9 @@ function Dashboard() {
   const [chartMode, setChartMode] = useState<"line" | "candle">("line");
   const [selectedTrade, setSelectedTrade] = useState<TradeEvent | null>(null);
   const [tradeEventsMap, setTradeEventsMap] = useState<Record<string, TradeEvent>>({});
+  const [zoomLeft, setZoomLeft] = useState<string | null>(null);
+  const [zoomRight, setZoomRight] = useState<string | null>(null);
+  const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null);
 
   const load = async () => {
     try {
@@ -371,8 +376,35 @@ function Dashboard() {
     return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
-  const filteredChart = filterChartByRange(chartData, timeRange);
+  const baseFiltered = filterChartByRange(chartData, timeRange);
+  const filteredChart = zoomDomain
+    ? baseFiltered.slice(zoomDomain[0], zoomDomain[1] + 1)
+    : baseFiltered;
   const candleData = aggregateToCandles(filteredChart, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
+
+  const handleMouseDown = (e: any) => {
+    if (e?.activeLabel) setZoomLeft(e.activeLabel);
+  };
+  const handleMouseMove = (e: any) => {
+    if (zoomLeft && e?.activeLabel) setZoomRight(e.activeLabel);
+  };
+  const handleMouseUp = () => {
+    if (zoomLeft && zoomRight) {
+      const data = baseFiltered;
+      const leftIdx = data.findIndex((d) => d.timestamp === zoomLeft);
+      const rightIdx = data.findIndex((d) => d.timestamp === zoomRight);
+      if (leftIdx >= 0 && rightIdx >= 0 && leftIdx !== rightIdx) {
+        const lo = Math.min(leftIdx, rightIdx);
+        const hi = Math.max(leftIdx, rightIdx);
+        if (hi - lo >= 2) {
+          setZoomDomain([lo, hi]);
+        }
+      }
+    }
+    setZoomLeft(null);
+    setZoomRight(null);
+  };
+  const handleZoomReset = () => setZoomDomain(null);
   const s = summary?.summary;
   const netPnl = s?.net_pnl_usd ?? 0;
   const pnlPositive = netPnl >= 0;
@@ -421,7 +453,13 @@ function Dashboard() {
 
         <div className="chart-container" style={{ marginTop: "1rem" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartMode === "candle" ? candleData : filteredChart} margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
+            <ComposedChart
+              data={chartMode === "candle" ? candleData : filteredChart}
+              margin={{ top: 5, right: 50, left: 0, bottom: 5 }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+            >
               <defs>
                 <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0.2} />
@@ -436,7 +474,8 @@ function Dashboard() {
                 fontSize={10}
                 tickLine={false}
                 axisLine={{ stroke: "#333" }}
-                minTickGap={40}
+                minTickGap={80}
+                interval="preserveStartEnd"
               />
               <YAxis
                 orientation="right"
@@ -449,16 +488,9 @@ function Dashboard() {
                 tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               />
               <Tooltip content={<CustomTooltip chartMode={chartMode} />} />
-              <Brush
-                dataKey="timestamp"
-                height={20}
-                stroke="#444"
-                fill="#1a1a1a"
-                tickFormatter={(ts: string) => {
-                  const d = new Date(ts);
-                  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-                }}
-              />
+              {zoomLeft && zoomRight && (
+                <ReferenceArea x1={zoomLeft} x2={zoomRight} strokeOpacity={0.3} fill="rgba(255,255,255,0.1)" />
+              )}
               {chartMode === "line" ? (
                 <Area
                   type="monotone"
@@ -526,13 +558,29 @@ function Dashboard() {
               <button
                 key={range}
                 className={`tab ${timeRange === range ? "active" : ""}`}
-                onClick={() => setTimeRange(range)}
+                onClick={() => { setTimeRange(range); setZoomDomain(null); }}
                 style={{ padding: "0.4rem 0.75rem", fontSize: "0.75rem", borderBottom: "none" }}
               >
                 {range}
               </button>
             ))}
           </div>
+          {zoomDomain && (
+            <button
+              onClick={handleZoomReset}
+              style={{
+                padding: "0.35rem 0.75rem",
+                fontSize: "0.7rem",
+                background: "rgba(255,77,106,0.15)",
+                border: "1px solid #ff4d6a",
+                borderRadius: 20,
+                color: "#ff4d6a",
+                cursor: "pointer",
+              }}
+            >
+              Reset Zoom
+            </button>
+          )}
           <button
             onClick={() => setChartMode(chartMode === "line" ? "candle" : "line")}
             style={{
@@ -648,9 +696,9 @@ function Dashboard() {
           <div className="value">{summary?.win_rate?.win_rate?.toFixed(1) ?? "0.0"}%</div>
           <div className="value-sm">
             {summary?.win_rate?.winning_trades ?? 0}W / {summary?.win_rate?.losing_trades ?? 0}L
-            {!hasClosedTrades && (s?.open_trades ?? 0) > 0 && (
-              <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>(no closes yet)</span>
-            )}
+            <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>
+              ({summary?.win_rate?.closed_trades ?? 0} closed{(summary?.win_rate?.open_trades ?? 0) > 0 ? `, ${summary?.win_rate?.open_trades} open` : ""})
+            </span>
           </div>
         </div>
         <div className="card stat-card">

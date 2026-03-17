@@ -2,6 +2,7 @@ import json
 import os
 import time
 import logging
+import random
 import threading
 import pandas as pd
 from datetime import datetime, timezone
@@ -113,14 +114,13 @@ class PaperExchangeManager:
         ask = ticker.get("ask") or price
         spread = (ask - bid) / price if price > 0 else 0
 
+        additional_slip = random.uniform(0.0002, 0.0008)
         if side == "buy":
             fill_price = ask if ask > 0 else price
-            if spread > 0:
-                fill_price *= 1.0001
+            fill_price *= (1 + additional_slip)
         else:
             fill_price = bid if bid > 0 else price
-            if spread > 0:
-                fill_price *= 0.9999
+            fill_price *= (1 - additional_slip)
 
         base = symbol.split("/")[0]
         quote = symbol.split("/")[1] if "/" in symbol else "USDT"
@@ -129,9 +129,22 @@ class PaperExchangeManager:
         if side == "buy":
             cost = amount * fill_price
             fee = cost * fee_rate
+            required = cost + fee
+            available_quote = self.balances.get(quote, 0)
+            if available_quote < required:
+                if available_quote < 1.0:
+                    raise ValueError(f"Insufficient {quote} balance: have {available_quote:.4f}, need {required:.4f}")
+                amount = (available_quote * 0.999) / (fill_price * (1 + fee_rate))
+                cost = amount * fill_price
+                fee = cost * fee_rate
             self.balances[quote] = self.balances.get(quote, 0) - cost - fee
             self.balances[base] = self.balances.get(base, 0) + amount
         else:
+            available_base = self.balances.get(base, 0)
+            if available_base < amount:
+                amount = available_base
+            if amount <= 0:
+                raise ValueError(f"Insufficient {base} balance for sell")
             revenue = amount * fill_price
             fee = revenue * fee_rate
             self.balances[base] = self.balances.get(base, 0) - amount
@@ -152,8 +165,8 @@ class PaperExchangeManager:
             "ask": ask,
             "spread_pct": round(spread * 100, 6),
             "slippage_usd": round(slippage_usd, 8),
-            "cost": amount * fill_price,
-            "fee": amount * fill_price * fee_rate,
+            "cost": cost if side == "buy" else revenue,
+            "fee": fee,
             "fee_rate": fee_rate,
             "type": order_type,
             "status": "filled",

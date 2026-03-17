@@ -179,13 +179,17 @@ class TradeStore:
 
     def win_rate(self) -> dict:
         closed = self.get_closed_trades()
+        open_trades = self.get_open_trades()
         winners = [t for t in closed if t.get("pnl_usd", 0) > 0]
-        total = len(closed)
+        losers = [t for t in closed if t.get("pnl_usd", 0) <= 0]
+        total_closed = len(closed)
         return {
-            "total_trades": total,
+            "total_trades": len(self.trades),
+            "closed_trades": total_closed,
+            "open_trades": len(open_trades),
             "winning_trades": len(winners),
-            "losing_trades": total - len(winners),
-            "win_rate": round(len(winners) / total * 100, 1) if total > 0 else 0.0,
+            "losing_trades": len(losers),
+            "win_rate": round(len(winners) / total_closed * 100, 1) if total_closed > 0 else 0.0,
         }
 
     def pnl_by_bot(self) -> dict:

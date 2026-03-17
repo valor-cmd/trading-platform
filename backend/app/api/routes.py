@@ -295,6 +295,7 @@ def reset_account(bg: BackgroundTasks, _auth=Depends(require_auth)):
     trade_store.withdrawals.clear()
     trade_store.snapshots.clear()
     trade_store._running_balance = 0.0
+    trade_store._next_id = 1
     trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": 0.0,
@@ -302,7 +303,14 @@ def reset_account(bg: BackgroundTasks, _auth=Depends(require_auth)):
         "total_trades": 0,
     })
     trade_store._save()
-    bg.add_task(risk_engine.rebalance_buckets, 0, {})
+
+    async def _reset_buckets():
+        from app.risk.engine import BucketAllocation
+        allocation = BucketAllocation(total_capital_usd=0.0)
+        await risk_engine.save_bucket_allocation(allocation)
+        await store.set("daily_pnl", "0")
+
+    bg.add_task(_reset_buckets)
     return {"status": "reset", "balance": 0.0}
 
 
