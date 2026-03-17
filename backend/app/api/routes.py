@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel, field_validator
 
 from app.core.security import require_auth
@@ -231,7 +231,7 @@ async def get_analysis(exchange_id: str, symbol: str, timeframe: str = "1h"):
 
 
 @router.post("/accounting/deposit")
-async def record_deposit(req: DepositRequest, _auth=Depends(require_auth)):
+def record_deposit(req: DepositRequest, bg: BackgroundTasks, _auth=Depends(require_auth)):
     dep = trade_store.add_deposit({
         "exchange": req.exchange,
         "amount_usd": req.amount_usd,
@@ -243,7 +243,7 @@ async def record_deposit(req: DepositRequest, _auth=Depends(require_auth)):
     paper_exchange.balances["USDT"] = paper_exchange.balances.get("USDT", 0) + req.amount_usd
     paper_exchange._save()
     new_total = paper_exchange.balances.get("USDT", 0)
-    await risk_engine.rebalance_buckets(new_total, {})
+    bg.add_task(risk_engine.rebalance_buckets, new_total, {})
     trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": round(new_total, 5),
@@ -259,7 +259,7 @@ async def record_deposit(req: DepositRequest, _auth=Depends(require_auth)):
 
 
 @router.post("/accounting/withdrawal")
-async def record_withdrawal(req: WithdrawalRequest, _auth=Depends(require_auth)):
+def record_withdrawal(req: WithdrawalRequest, bg: BackgroundTasks, _auth=Depends(require_auth)):
     wd = trade_store.add_withdrawal({
         "exchange": req.exchange,
         "amount_usd": req.amount_usd,
@@ -271,7 +271,7 @@ async def record_withdrawal(req: WithdrawalRequest, _auth=Depends(require_auth))
     paper_exchange.balances["USDT"] = max(0, paper_exchange.balances.get("USDT", 0) - req.amount_usd)
     paper_exchange._save()
     new_total = paper_exchange.balances.get("USDT", 0)
-    await risk_engine.rebalance_buckets(new_total, {})
+    bg.add_task(risk_engine.rebalance_buckets, new_total, {})
     trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": round(new_total, 5),
@@ -287,7 +287,7 @@ async def record_withdrawal(req: WithdrawalRequest, _auth=Depends(require_auth))
 
 
 @router.post("/accounting/reset")
-async def reset_account(_auth=Depends(require_auth)):
+def reset_account(bg: BackgroundTasks, _auth=Depends(require_auth)):
     paper_exchange.balances = {"USDT": 0.0}
     paper_exchange._save()
     trade_store.trades.clear()
@@ -302,12 +302,12 @@ async def reset_account(_auth=Depends(require_auth)):
         "total_trades": 0,
     })
     trade_store._save()
-    await risk_engine.rebalance_buckets(0, {})
+    bg.add_task(risk_engine.rebalance_buckets, 0, {})
     return {"status": "reset", "balance": 0.0}
 
 
 @router.get("/accounting/summary")
-async def get_accounting_summary():
+def get_accounting_summary():
     data = trade_store.full_accounting()
     live_total = _fast_live_balance()
     usdt = paper_exchange.balances.get("USDT", 0)
@@ -324,22 +324,22 @@ async def get_accounting_summary():
 
 
 @router.get("/accounting/pnl")
-async def get_pnl(days: int = 30):
+def get_pnl(days: int = 30):
     return trade_store.pnl_by_date(days)
 
 
 @router.get("/accounting/win-rate")
-async def get_win_rate():
+def get_win_rate():
     return trade_store.win_rate()
 
 
 @router.get("/accounting/by-bot")
-async def get_pnl_by_bot():
+def get_pnl_by_bot():
     return trade_store.pnl_by_bot()
 
 
 @router.get("/accounting/trades")
-async def get_trades(status: str = "all"):
+def get_trades(status: str = "all"):
     if status == "open":
         return trade_store.get_open_trades()
     elif status == "closed":
@@ -348,12 +348,12 @@ async def get_trades(status: str = "all"):
 
 
 @router.get("/accounting/trades/with-balance")
-async def get_trades_with_balance():
+def get_trades_with_balance():
     return trade_store.trades_with_running_balance()
 
 
 @router.get("/accounting/active-trades-live")
-async def get_active_trades_live():
+def get_active_trades_live():
     open_trades = trade_store.get_open_trades()
     entry_prices = _entry_price_map()
     cached_prices: dict[str, float] = {}
@@ -390,7 +390,7 @@ async def get_active_trades_live():
 
 
 @router.get("/accounting/fees")
-async def get_total_fees():
+def get_total_fees():
     return {
         "total_fees_usd": trade_store.total_fees(),
         "fee_breakdown": {
@@ -401,7 +401,7 @@ async def get_total_fees():
 
 
 @router.get("/accounting/live-balance")
-async def get_live_balance():
+def get_live_balance():
     usdt = paper_exchange.balances.get("USDT", 0)
     live_total = _fast_live_balance()
     open_pos = live_total - usdt
@@ -491,7 +491,7 @@ async def get_bot_status():
 
 
 @router.get("/accounting/ledger")
-async def get_ledger():
+def get_ledger():
     return trade_store.get_ledger()
 
 
