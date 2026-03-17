@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 import aiohttp
 from datetime import datetime, timezone
@@ -254,15 +255,21 @@ class SolanaDEXAdapter(BaseExchangeAdapter):
         return {"total": {}, "free": {}, "used": {}}
 
     async def create_order(self, symbol: str, side: str, amount: float, price: Optional[float] = None, order_type: str = "market") -> OrderResult:
+        t = await self.fetch_ticker(symbol)
         if price is None:
-            t = await self.fetch_ticker(symbol)
             price = t.last
-        fee = amount * price * self._fee_rate
+        slip = random.uniform(0.003, 0.012)
+        if side == "buy":
+            fill_price = price * (1 + slip)
+        else:
+            fill_price = price * (1 - slip)
+        cost = amount * fill_price
+        fee = cost * self._fee_rate
         return OrderResult(
             order_id=f"sol_dex_{int(time.time())}_{id(self)}",
             exchange_id=self.exchange_id,
-            symbol=symbol, side=side, amount=amount, price=price,
-            cost=amount * price, fee=fee, status="filled",
+            symbol=symbol, side=side, amount=amount, price=fill_price,
+            cost=cost, fee=fee, status="filled",
             timestamp=datetime.now(timezone.utc).isoformat(), is_paper=True,
         )
 

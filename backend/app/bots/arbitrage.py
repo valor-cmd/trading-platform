@@ -67,9 +67,20 @@ class ArbitrageBot:
             logger.warning(f"ARB ABORTED: sell slippage {sell_slippage*100:.2f}% > max {self.arb_engine.config.max_slippage_pct}% for {opp.symbol}")
             return
 
+        withdrawal_fee = opp.withdrawal_fee_usd
+
         revenue = sell_order.cost - sell_order.fee
-        cost = buy_order.cost + buy_order.fee
+        cost = buy_order.cost + buy_order.fee + withdrawal_fee
         pnl = revenue - cost
+
+        if pnl <= 0:
+            logger.info(
+                f"ARB SKIPPED (negative after costs): {opp.symbol} "
+                f"gross_spread=${revenue - buy_order.cost:.4f} "
+                f"fees=${buy_order.fee + sell_order.fee:.4f} "
+                f"withdrawal=${withdrawal_fee:.2f} net=${pnl:.4f}"
+            )
+            return
 
         self.trades_executed += 1
         await self.risk.update_daily_pnl(pnl)
@@ -79,28 +90,35 @@ class ArbitrageBot:
             "exchange": f"{opp.buy_exchange}->{opp.sell_exchange}",
             "symbol": opp.symbol,
             "side": "arb",
-            "entry_price": opp.buy_price,
-            "exit_price": opp.sell_price,
+            "entry_price": buy_order.price,
+            "exit_price": sell_order.price,
             "quantity": amount,
             "leverage": 1.0,
             "stop_loss_price": 0,
             "take_profit_price": 0,
-            "entry_fee_usd": buy_order.fee,
+            "entry_fee_usd": buy_order.fee + withdrawal_fee,
             "exit_fee_usd": sell_order.fee,
             "pnl_usd": round(pnl, 4),
             "bucket": "arbitrage",
             "slippage_buy_pct": round(buy_slippage * 100, 4),
             "slippage_sell_pct": round(sell_slippage * 100, 4),
-            "reasoning": f"Arb: {opp.buy_exchange}->{opp.sell_exchange} spread={opp.spread_pct:.2f}% profit={opp.estimated_profit_pct:.2f}% slip={buy_slippage*100:.2f}%+{sell_slippage*100:.2f}%",
+            "withdrawal_fee_usd": round(withdrawal_fee, 4),
+            "reasoning": (
+                f"Arb: {opp.buy_exchange}->{opp.sell_exchange} "
+                f"spread={opp.spread_pct:.2f}% net_profit={opp.estimated_profit_pct:.2f}% "
+                f"slip={buy_slippage*100:.2f}%+{sell_slippage*100:.2f}% "
+                f"wd_fee=${withdrawal_fee:.2f} vol24h=${opp.min_volume_24h:.0f}"
+            ),
             "is_paper": True,
             "status": "closed",
         }
         t = trade_store.add_trade(trade_record)
-        trade_store.close_trade(t["id"], opp.sell_price, round(pnl, 4), sell_order.fee, "closed")
+        trade_store.close_trade(t["id"], sell_order.price, round(pnl, 4), sell_order.fee, "closed")
 
         logger.info(
-            f"ARB EXECUTED: {opp.symbol} buy@{opp.buy_exchange} ${opp.buy_price:.6f} -> "
-            f"sell@{opp.sell_exchange} ${opp.sell_price:.6f} PnL=${pnl:.4f}"
+            f"ARB EXECUTED: {opp.symbol} buy@{opp.buy_exchange} ${buy_order.price:.6f} -> "
+            f"sell@{opp.sell_exchange} ${sell_order.price:.6f} "
+            f"PnL=${pnl:.4f} (wd_fee=${withdrawal_fee:.2f}, slip={buy_slippage*100:.2f}%+{sell_slippage*100:.2f}%)"
         )
 
     async def start(self, interval_seconds: int = 10):

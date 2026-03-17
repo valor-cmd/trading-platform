@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -74,19 +75,27 @@ class CCXTLiveAdapter(BaseExchangeAdapter):
         return {"total": {}, "free": {}, "used": {}}
 
     async def create_order(self, symbol: str, side: str, amount: float, price: Optional[float] = None, order_type: str = "market") -> OrderResult:
+        t = await self.fetch_ticker(symbol)
         if price is None:
-            t = await self.fetch_ticker(symbol)
             price = t.last
+        bid = t.bid if t.bid > 0 else price
+        ask = t.ask if t.ask > 0 else price
+        additional_slip = random.uniform(0.0002, 0.001)
+        if side == "buy":
+            fill_price = ask * (1 + additional_slip)
+        else:
+            fill_price = bid * (1 - additional_slip)
         fee_rate = live_prices.get_fee(self.exchange_id, symbol)
-        fee = amount * price * fee_rate
+        cost = amount * fill_price
+        fee = cost * fee_rate
         return OrderResult(
             order_id=f"{self.exchange_id}_{int(time.time())}_{id(self)}",
             exchange_id=self.exchange_id,
             symbol=symbol,
             side=side,
             amount=amount,
-            price=price,
-            cost=amount * price,
+            price=fill_price,
+            cost=cost,
             fee=fee,
             status="filled",
             timestamp=datetime.now(timezone.utc).isoformat(),

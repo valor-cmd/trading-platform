@@ -1,3 +1,4 @@
+import random
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -64,21 +65,29 @@ class PaperAdapter(BaseExchangeAdapter):
 
     async def create_order(self, symbol: str, side: str, amount: float, price: Optional[float] = None, order_type: str = "market") -> OrderResult:
         self.order_count += 1
+        t = await self.fetch_ticker(symbol)
         if price is None:
-            t = await self.fetch_ticker(symbol)
             price = t.last
+        bid = t.bid if t.bid > 0 else price
+        ask = t.ask if t.ask > 0 else price
+        additional_slip = random.uniform(0.0002, 0.001)
+        if side == "buy":
+            fill_price = ask * (1 + additional_slip)
+        else:
+            fill_price = bid * (1 - additional_slip)
 
         base = symbol.split("/")[0]
         quote = symbol.split("/")[1] if "/" in symbol else "USDT"
         fee_rate = live_prices.get_fee(self._source, symbol)
-        fee = amount * price * fee_rate
+        cost = amount * fill_price
+        fee = cost * fee_rate
 
         if side == "buy":
-            self.balances[quote] = self.balances.get(quote, 0) - (amount * price) - fee
+            self.balances[quote] = self.balances.get(quote, 0) - cost - fee
             self.balances[base] = self.balances.get(base, 0) + amount
         else:
             self.balances[base] = self.balances.get(base, 0) - amount
-            self.balances[quote] = self.balances.get(quote, 0) + (amount * price) - fee
+            self.balances[quote] = self.balances.get(quote, 0) + cost - fee
 
         return OrderResult(
             order_id=f"paper_{self.order_count}_{int(time.time())}",
@@ -86,8 +95,8 @@ class PaperAdapter(BaseExchangeAdapter):
             symbol=symbol,
             side=side,
             amount=amount,
-            price=price,
-            cost=amount * price,
+            price=fill_price,
+            cost=cost,
             fee=fee,
             status="filled",
             timestamp=datetime.now(timezone.utc).isoformat(),
