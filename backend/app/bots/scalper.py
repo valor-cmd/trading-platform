@@ -13,8 +13,11 @@ class ScalperBot(BaseBot):
     def get_symbols(self) -> list[str]:
         return self._get_all_tradable_symbols()
 
+    async def get_symbols_filtered(self) -> list[str]:
+        return await self._get_filtered_symbols()
+
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
-        if signal.confidence < 0.1:
+        if signal.confidence < 0.35:
             return False
 
         regime = signal.regime
@@ -58,7 +61,7 @@ class ScalperBot(BaseBot):
             else:
                 score -= 1.0
 
-        return score >= 4.5
+        return score >= 6.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime

@@ -179,8 +179,8 @@ class RiskEngine:
                 reasoning=f"Bucket {bot_type} fully allocated (${used:.2f}/${bucket_limit:.2f})", bucket=bot_type,
             )
 
-        risk_pct_map = {"scalper": 0.5, "swing": 1.0, "long_term": 1.5}
-        risk_pct = risk_pct_map.get(bot_type, 1.0) * min(max(signal_confidence, 0.3), 1.0)
+        risk_pct_map = {"scalper": 1.5, "swing": 2.5, "long_term": 3.0}
+        risk_pct = risk_pct_map.get(bot_type, 2.0) * min(max(signal_confidence, 0.5), 1.0)
 
         sl_multiplier_map = {"scalper": 1.0, "swing": 1.5, "long_term": 2.0}
         sl_multiplier = sl_multiplier_map.get(bot_type, 1.5)
@@ -189,10 +189,10 @@ class RiskEngine:
         position_size = self.calculate_position_size(available, risk_pct, entry_price, stop_loss, fee_rate)
         position_size = min(position_size, available)
 
-        max_per_trade = allocation.total_capital_usd * 0.05
+        max_per_trade = allocation.total_capital_usd * 0.15
         position_size = min(position_size, max_per_trade)
 
-        if position_size < 0.01:
+        if position_size < 3.0:
             return RiskAssessment(
                 approved=False, position_size_usd=0, stop_loss_price=stop_loss,
                 take_profit_price=None, risk_reward_ratio=0, max_loss_usd=0,

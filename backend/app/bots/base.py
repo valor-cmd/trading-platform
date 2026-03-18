@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import traceback
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from typing import Optional
 from app.core.store import store, trade_store
 from app.exchange.simulator import PaperExchangeManager
 from app.exchange.registry import exchange_registry
+from app.exchange.live_prices import live_prices
 from app.indicators.technical import TechnicalAnalyzer, SignalResult, MarketRegime
 from app.indicators.sentiment import SentimentAnalyzer
 from app.indicators.confirmation import evaluate_confirmation, ConfirmationResult
@@ -16,6 +18,60 @@ from app.risk.engine import RiskEngine, RiskAssessment
 from app.models.trade import BotType
 
 logger = logging.getLogger(__name__)
+
+MAX_OPEN_TRADES = {
+    "scalper": 3,
+    "swing": 3,
+    "long_term": 5,
+}
+GLOBAL_MAX_OPEN = 12
+MAX_DAILY_TRADES = 15
+SYMBOL_COOLDOWN_SECONDS = {
+    "scalper": 3600,
+    "swing": 14400,
+    "long_term": 86400,
+}
+MIN_CONFIDENCE = {
+    "scalper": 0.35,
+    "swing": 0.30,
+    "long_term": 0.25,
+}
+MIN_POSITION_USD = 3.0
+TOP_SYMBOL_LIMIT = 100
+
+_symbol_volume_cache: dict = {"symbols": [], "fetched_at": 0}
+
+
+async def get_top_symbols_by_volume(exchange_manager: PaperExchangeManager, limit: int = TOP_SYMBOL_LIMIT) -> list[str]:
+    now = time.time()
+    if _symbol_volume_cache["symbols"] and (now - _symbol_volume_cache["fetched_at"]) < 3600:
+        return _symbol_volume_cache["symbols"]
+
+    all_symbols = exchange_manager.get_all_symbols()
+    volume_data = []
+    for sym in all_symbols:
+        if "/USDT" not in sym and "/USDC" not in sym and "/USD" not in sym:
+            continue
+        try:
+            ex = exchange_manager._resolve_exchange(sym)
+            ticker = await live_prices.fetch_ticker(ex, sym)
+            last = ticker.get("last", 0) or 0
+            vol = ticker.get("volume", 0) or 0
+            vol_usd = last * vol
+            if vol_usd > 100_000 and last >= 0.001:
+                volume_data.append((sym, vol_usd))
+        except Exception:
+            continue
+        if len(volume_data) >= limit * 3:
+            break
+
+    volume_data.sort(key=lambda x: x[1], reverse=True)
+    top = [s for s, _ in volume_data[:limit]]
+    _symbol_volume_cache["symbols"] = top
+    _symbol_volume_cache["fetched_at"] = now
+    if top:
+        logger.info(f"Symbol filter: {len(top)} liquid symbols selected from {len(all_symbols)} total")
+    return top
 
 
 class BaseBot(ABC):
@@ -34,6 +90,9 @@ class BaseBot(ABC):
         self.active_trades: list[dict] = []
         self._cycle_count = 0
         self._last_scan_results: dict[str, str] = {}
+        self._symbol_cooldowns: dict[str, float] = {}
+        self._daily_trade_count = 0
+        self._daily_trade_date: str = ""
 
     @abstractmethod
     def get_timeframes(self) -> list[str]:
@@ -52,6 +111,30 @@ class BaseBot(ABC):
         cex_symbols = set(self.exchange.get_all_symbols())
         symbols.update(cex_symbols)
         return list(symbols)
+
+    async def _get_filtered_symbols(self) -> list[str]:
+        top = await get_top_symbols_by_volume(self.exchange)
+        if top:
+            return top
+        return self._get_all_tradable_symbols()
+
+    def _check_cooldown(self, symbol: str) -> bool:
+        cooldown = SYMBOL_COOLDOWN_SECONDS.get(self.bot_type.value, 3600)
+        last_trade = self._symbol_cooldowns.get(symbol, 0)
+        return (time.time() - last_trade) >= cooldown
+
+    def _record_cooldown(self, symbol: str):
+        self._symbol_cooldowns[symbol] = time.time()
+
+    def _check_daily_limit(self) -> bool:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self._daily_trade_date:
+            self._daily_trade_count = 0
+            self._daily_trade_date = today
+        return self._daily_trade_count < MAX_DAILY_TRADES
+
+    def _get_global_open_count(self) -> int:
+        return len(trade_store.get_open_trades())
 
     @abstractmethod
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
@@ -93,10 +176,15 @@ class BaseBot(ABC):
 
     async def run_cycle(self, exchange_id: str):
         self._cycle_count += 1
-        symbols = self.get_symbols()
+        symbols = await self._get_filtered_symbols()
         if not symbols:
             logger.warning(f"{self.bot_type.value} has no available symbols to scan")
             return
+
+        bot_max = MAX_OPEN_TRADES.get(self.bot_type.value, 3)
+        global_open = self._get_global_open_count()
+        bot_open = len(self.active_trades)
+        can_open = bot_open < bot_max and global_open < GLOBAL_MAX_OPEN and self._check_daily_limit()
 
         sentiment_data = None
         sentiment_interp = {"bias": "neutral", "weight": 0}
@@ -110,6 +198,7 @@ class BaseBot(ABC):
         trades_closed = 0
         regime_rejections = 0
         confirmation_rejections = 0
+        min_conf = MIN_CONFIDENCE.get(self.bot_type.value, 0.25)
 
         for symbol in symbols:
             try:
@@ -122,7 +211,13 @@ class BaseBot(ABC):
                 signal = analyzer.analyze()
 
                 has_open = any(t["symbol"] == symbol for t in self.active_trades)
-                if not has_open:
+                if not has_open and can_open:
+                    if signal.confidence < min_conf:
+                        continue
+
+                    if not self._check_cooldown(symbol):
+                        continue
+
                     if await self.evaluate_entry(symbol, signal, sentiment_interp):
                         side = self._determine_side(signal)
 
@@ -151,17 +246,28 @@ class BaseBot(ABC):
                             signal.atr, signal.confidence, fee_rate,
                         )
 
+                        if assessment.approved and assessment.position_size_usd < MIN_POSITION_USD:
+                            self._last_scan_results[symbol] = f"position too small: ${assessment.position_size_usd:.2f} < ${MIN_POSITION_USD}"
+                            continue
+
                         if assessment.approved:
                             await self.execute_trade(
                                 exchange_id, symbol, signal, assessment,
                                 fee_rate, side, confirmation,
                             )
                             trades_opened += 1
+                            self._record_cooldown(symbol)
+                            self._daily_trade_count += 1
+                            bot_open += 1
+                            global_open += 1
+                            can_open = bot_open < bot_max and global_open < GLOBAL_MAX_OPEN and self._check_daily_limit()
                             logger.info(
                                 f"{self.bot_type.value} TRADE OPENED: {side.upper()} {symbol} "
-                                f"@ ${entry_price:.4f} | regime={confirmation.regime} "
+                                f"@ ${entry_price:.4f} pos=${assessment.position_size_usd:.2f} "
+                                f"| regime={confirmation.regime} "
                                 f"score={confirmation.score:.1f}/{confirmation.required_score:.1f} "
-                                f"confs={len(confirmation.confirmations)}"
+                                f"confs={len(confirmation.confirmations)} "
+                                f"[{bot_open}/{bot_max} bot, {global_open}/{GLOBAL_MAX_OPEN} global]"
                             )
                         else:
                             self._last_scan_results[symbol] = f"risk rejected: {assessment.reasoning}"
