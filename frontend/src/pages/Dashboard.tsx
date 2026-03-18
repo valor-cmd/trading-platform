@@ -136,18 +136,26 @@ function aggregateToCandles(
   intervalMs: number,
 ): OHLCCandle[] {
   if (data.length === 0) return [];
-  const candles: OHLCCandle[] = [];
+  const rawCandles: OHLCCandle[] = [];
   let bucketStart = Math.floor(new Date(data[0].timestamp).getTime() / intervalMs) * intervalMs;
   let o = data[0].balance, h = o, l = o, c = o;
   let hasBuy = false, hasSell = false, hasDeposit = false;
   for (const pt of data) {
     const bucket = Math.floor(new Date(pt.timestamp).getTime() / intervalMs) * intervalMs;
     if (bucket !== bucketStart) {
-      candles.push({
+      rawCandles.push({
         timestamp: new Date(bucketStart).toISOString(), open: o, high: h, low: l, close: c,
         ohlcRange: [Math.min(o, c), Math.max(o, c)],
         buy: hasBuy ? c : undefined, sell: hasSell ? c : undefined, deposit: hasDeposit ? c : undefined,
       });
+      const gapBuckets = Math.floor((bucket - bucketStart) / intervalMs) - 1;
+      for (let g = 1; g <= gapBuckets; g++) {
+        const gapTs = bucketStart + g * intervalMs;
+        rawCandles.push({
+          timestamp: new Date(gapTs).toISOString(), open: c, high: c, low: c, close: c,
+          ohlcRange: [c, c],
+        });
+      }
       bucketStart = bucket; o = c; h = pt.balance; l = pt.balance;
       hasBuy = false; hasSell = false; hasDeposit = false;
     }
@@ -156,12 +164,34 @@ function aggregateToCandles(
     if (pt.sell != null) hasSell = true;
     if (pt.deposit != null) hasDeposit = true;
   }
-  candles.push({
+  rawCandles.push({
     timestamp: new Date(bucketStart).toISOString(), open: o, high: h, low: l, close: c,
     ohlcRange: [Math.min(o, c), Math.max(o, c)],
     buy: hasBuy ? c : undefined, sell: hasSell ? c : undefined, deposit: hasDeposit ? c : undefined,
   });
-  return candles;
+  const nowBucket = Math.floor(Date.now() / intervalMs) * intervalMs;
+  const lastBucket = Math.floor(new Date(rawCandles[rawCandles.length - 1].timestamp).getTime() / intervalMs) * intervalMs;
+  const trailingGap = Math.floor((nowBucket - lastBucket) / intervalMs);
+  for (let g = 1; g <= trailingGap; g++) {
+    rawCandles.push({
+      timestamp: new Date(lastBucket + g * intervalMs).toISOString(), open: c, high: c, low: c, close: c,
+      ohlcRange: [c, c],
+    });
+  }
+  if (rawCandles.length < MAX_CANDLES) {
+    const firstTs = Math.floor(new Date(rawCandles[0].timestamp).getTime() / intervalMs) * intervalMs;
+    const firstVal = rawCandles[0].open;
+    const needed = MAX_CANDLES - rawCandles.length;
+    const prepend: OHLCCandle[] = [];
+    for (let i = needed; i > 0; i--) {
+      prepend.push({
+        timestamp: new Date(firstTs - i * intervalMs).toISOString(), open: firstVal, high: firstVal, low: firstVal, close: firstVal,
+        ohlcRange: [firstVal, firstVal],
+      });
+    }
+    return [...prepend, ...rawCandles];
+  }
+  return rawCandles;
 }
 
 const CandlestickBar = (props: any) => {
@@ -437,7 +467,7 @@ function Dashboard() {
     const maxCandlesForTf = MAX_CANDLES;
     const currentVisible = zoomDomain ? zoomDomain[1] : DEFAULT_CANDLES;
     const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
-    const newVisible = Math.max(MIN_CANDLES, Math.min(maxCandlesForTf, Math.min(total, Math.round(currentVisible * zoomFactor))));
+    const newVisible = Math.max(MIN_CANDLES, Math.min(maxCandlesForTf, Math.round(currentVisible * zoomFactor)));
     if (newVisible === DEFAULT_CANDLES) {
       setZoomDomain(null);
     } else {
