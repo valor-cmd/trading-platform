@@ -102,7 +102,7 @@ const INTERVAL_MS: Record<string, number> = {
 const DEFAULT_CANDLES = 60;
 const MIN_CANDLES = 5;
 const MAX_CANDLES: Record<string, number> = {
-  "1M": 720, "5M": 576, "15M": 240, "1H": 168,
+  "1M": 300, "5M": 180, "15M": 120, "1H": 168,
   "4H": 180, "1D": 365, "1W": 104,
 };
 
@@ -391,10 +391,20 @@ function Dashboard() {
     ? candleData.map(c => ({ timestamp: c.timestamp, balance: c.close, buy: c.buy, sell: c.sell, deposit: c.deposit }))
     : chartData.slice(-60);
 
-  const candleYMin = candleData.length > 0 ? Math.min(...candleData.map(c => c.low)) : 0;
-  const candleYMax = candleData.length > 0 ? Math.max(...candleData.map(c => c.high)) : 100;
-  const candlePad = (candleYMax - candleYMin) * 0.05 || 1;
-  const candleDomain: [number, number] = [candleYMin - candlePad, candleYMax + candlePad];
+  const candleDomain: [number, number] = (() => {
+    if (candleData.length === 0) return [0, 100] as [number, number];
+    const skipFirst = candleData.length > 2 ? candleData.slice(1) : candleData;
+    const allHighs = skipFirst.map(c => Math.max(c.open, c.close, c.high));
+    const allLows = skipFirst.map(c => Math.min(c.open, c.close, c.low));
+    const dataHigh = Math.max(...allHighs);
+    const dataLow = Math.min(...allLows);
+    const range = dataHigh - dataLow || 1;
+    const pad = range * 0.2;
+    let lo = dataLow - pad;
+    let hi = dataHigh + pad;
+    if (lo < 0) lo = 0;
+    return [lo, hi] as [number, number];
+  })();
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
