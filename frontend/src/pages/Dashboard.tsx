@@ -99,6 +99,13 @@ const INTERVAL_MS: Record<string, number> = {
   "4H": 14_400_000, "1D": 86_400_000, "1W": 604_800_000,
 };
 
+const DEFAULT_CANDLES = 60;
+const MIN_CANDLES = 5;
+const MAX_CANDLES: Record<string, number> = {
+  "1M": 720, "5M": 576, "15M": 240, "1H": 168,
+  "4H": 180, "1D": 365, "1W": 104,
+};
+
 function aggregateToCandles(
   data: { timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[],
   intervalMs: number,
@@ -208,7 +215,7 @@ function Dashboard() {
   const [arbStatus, setArbStatus] = useState<{ running: boolean; trades_executed: number; actionable: number } | null>(null);
   const [liveBalance, setLiveBalance] = useState<LiveBalance | null>(null);
   const [chartData, setChartData] = useState<{ timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[]>([]);
-  const [timeRange, setTimeRange] = useState("1W");
+  const [timeRange, setTimeRange] = useState("15M");
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
@@ -357,25 +364,6 @@ function Dashboard() {
     }
   };
 
-  const filterChartByRange = (data: typeof chartData, range: string) => {
-    if (range === "ALL" || data.length === 0) return data;
-    const now = new Date();
-    const rangeMs: Record<string, number> = {
-      "1M": 1 * 60 * 1000,
-      "5M": 5 * 60 * 1000,
-      "15M": 15 * 60 * 1000,
-      "1H": 60 * 60 * 1000,
-      "4H": 4 * 60 * 60 * 1000,
-      "1D": 24 * 60 * 60 * 1000,
-      "1W": 7 * 24 * 60 * 60 * 1000,
-    };
-    const ms = rangeMs[range];
-    if (!ms) return data;
-    const cutoff = new Date(now.getTime() - ms);
-    const filtered = data.filter((d) => new Date(d.timestamp) >= cutoff);
-    return filtered.length > 0 ? filtered : data.slice(-1);
-  };
-
   const formatXAxisTick = (ts: string) => {
     const d = new Date(ts);
     if (timeRange === "1M" || timeRange === "5M" || timeRange === "15M") {
@@ -388,11 +376,20 @@ function Dashboard() {
     return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
-  const baseFiltered = filterChartByRange(chartData, timeRange);
-  const filteredChart = zoomDomain
-    ? baseFiltered.slice(zoomDomain[0], zoomDomain[1] + 1)
-    : baseFiltered;
-  const candleData = aggregateToCandles(filteredChart, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
+  const allCandles = aggregateToCandles(chartData, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
+  const candleData = (() => {
+    if (allCandles.length === 0) return [];
+    if (zoomDomain) {
+      return allCandles.slice(
+        Math.max(0, allCandles.length - zoomDomain[1]),
+        allCandles.length - zoomDomain[0],
+      );
+    }
+    return allCandles.slice(-DEFAULT_CANDLES);
+  })();
+  const filteredChart = candleData.length > 0
+    ? candleData.map(c => ({ timestamp: c.timestamp, balance: c.close, buy: c.buy, sell: c.sell, deposit: c.deposit }))
+    : chartData.slice(-60);
 
   const candleYMin = candleData.length > 0 ? Math.min(...candleData.map(c => c.low)) : 0;
   const candleYMax = candleData.length > 0 ? Math.max(...candleData.map(c => c.high)) : 100;
@@ -401,22 +398,20 @@ function Dashboard() {
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
-    const data = baseFiltered;
-    if (data.length < 3) return;
-    const current = zoomDomain ?? [0, data.length - 1];
-    const span = current[1] - current[0];
-    const mid = Math.floor((current[0] + current[1]) / 2);
+    const total = allCandles.length;
+    if (total < 3) return;
+    const maxCandlesForTf = MAX_CANDLES[timeRange] ?? 200;
+    const currentVisible = zoomDomain
+      ? zoomDomain[1] - zoomDomain[0]
+      : Math.min(DEFAULT_CANDLES, total);
     const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
-    const newSpan = Math.max(5, Math.min(data.length, Math.round(span * zoomFactor)));
-    let lo = Math.max(0, mid - Math.floor(newSpan / 2));
-    let hi = lo + newSpan;
-    if (hi > data.length - 1) { hi = data.length - 1; lo = Math.max(0, hi - newSpan); }
-    if (newSpan >= data.length - 1) {
+    const newVisible = Math.max(MIN_CANDLES, Math.min(maxCandlesForTf, Math.min(total, Math.round(currentVisible * zoomFactor))));
+    if (newVisible >= total) {
       setZoomDomain(null);
     } else {
-      setZoomDomain([lo, hi]);
+      setZoomDomain([0, newVisible]);
     }
-  }, [baseFiltered, zoomDomain]);
+  }, [allCandles.length, zoomDomain, timeRange]);
 
   useEffect(() => {
     const el = chartContainerRef.current;
@@ -433,14 +428,12 @@ function Dashboard() {
   };
   const handleMouseUp = () => {
     if (zoomLeft && zoomRight) {
-      const data = baseFiltered;
-      const leftIdx = data.findIndex((d) => d.timestamp === zoomLeft);
-      const rightIdx = data.findIndex((d) => d.timestamp === zoomRight);
+      const leftIdx = candleData.findIndex((d) => d.timestamp === zoomLeft);
+      const rightIdx = candleData.findIndex((d) => d.timestamp === zoomRight);
       if (leftIdx >= 0 && rightIdx >= 0 && leftIdx !== rightIdx) {
-        const lo = Math.min(leftIdx, rightIdx);
-        const hi = Math.max(leftIdx, rightIdx);
-        if (hi - lo >= 2) {
-          setZoomDomain([lo, hi]);
+        const visCount = Math.abs(rightIdx - leftIdx);
+        if (visCount >= 2) {
+          setZoomDomain([0, visCount]);
         }
       }
     }
@@ -597,7 +590,7 @@ function Dashboard() {
 
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: "0.25rem" }}>
-            {["1M", "5M", "15M", "1H", "4H", "1D", "1W", "ALL"].map((range) => (
+            {["1M", "5M", "15M", "1H", "4H", "1D", "1W"].map((range) => (
               <button
                 key={range}
                 className={`tab ${timeRange === range ? "active" : ""}`}
