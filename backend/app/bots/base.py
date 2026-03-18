@@ -10,7 +10,6 @@ from typing import Optional
 from app.core.store import store, trade_store
 from app.exchange.simulator import PaperExchangeManager
 from app.exchange.registry import exchange_registry
-from app.exchange.live_prices import live_prices
 from app.indicators.technical import TechnicalAnalyzer, SignalResult, MarketRegime
 from app.indicators.sentiment import SentimentAnalyzer
 from app.indicators.confirmation import evaluate_confirmation, ConfirmationResult
@@ -20,58 +19,34 @@ from app.models.trade import BotType
 logger = logging.getLogger(__name__)
 
 MAX_OPEN_TRADES = {
-    "scalper": 3,
-    "swing": 3,
-    "long_term": 5,
+    "scalper": 5,
+    "swing": 5,
+    "long_term": 8,
+    "grid": 10,
+    "mean_reversion": 5,
+    "momentum": 5,
+    "dca": 8,
 }
-GLOBAL_MAX_OPEN = 12
-MAX_DAILY_TRADES = 15
+GLOBAL_MAX_OPEN = 40
 SYMBOL_COOLDOWN_SECONDS = {
-    "scalper": 3600,
-    "swing": 14400,
-    "long_term": 86400,
+    "scalper": 1800,
+    "swing": 7200,
+    "long_term": 43200,
+    "grid": 600,
+    "mean_reversion": 1800,
+    "momentum": 3600,
+    "dca": 3600,
 }
 MIN_CONFIDENCE = {
     "scalper": 0.35,
     "swing": 0.30,
     "long_term": 0.25,
+    "grid": 0.0,
+    "mean_reversion": 0.20,
+    "momentum": 0.30,
+    "dca": 0.0,
 }
 MIN_POSITION_USD = 3.0
-TOP_SYMBOL_LIMIT = 100
-
-_symbol_volume_cache: dict = {"symbols": [], "fetched_at": 0}
-
-
-async def get_top_symbols_by_volume(exchange_manager: PaperExchangeManager, limit: int = TOP_SYMBOL_LIMIT) -> list[str]:
-    now = time.time()
-    if _symbol_volume_cache["symbols"] and (now - _symbol_volume_cache["fetched_at"]) < 3600:
-        return _symbol_volume_cache["symbols"]
-
-    all_symbols = exchange_manager.get_all_symbols()
-    volume_data = []
-    for sym in all_symbols:
-        if "/USDT" not in sym and "/USDC" not in sym and "/USD" not in sym:
-            continue
-        try:
-            ex = exchange_manager._resolve_exchange(sym)
-            ticker = await live_prices.fetch_ticker(ex, sym)
-            last = ticker.get("last", 0) or 0
-            vol = ticker.get("volume", 0) or 0
-            vol_usd = last * vol
-            if vol_usd > 100_000 and last >= 0.001:
-                volume_data.append((sym, vol_usd))
-        except Exception:
-            continue
-        if len(volume_data) >= limit * 3:
-            break
-
-    volume_data.sort(key=lambda x: x[1], reverse=True)
-    top = [s for s, _ in volume_data[:limit]]
-    _symbol_volume_cache["symbols"] = top
-    _symbol_volume_cache["fetched_at"] = now
-    if top:
-        logger.info(f"Symbol filter: {len(top)} liquid symbols selected from {len(all_symbols)} total")
-    return top
 
 
 class BaseBot(ABC):
@@ -91,8 +66,6 @@ class BaseBot(ABC):
         self._cycle_count = 0
         self._last_scan_results: dict[str, str] = {}
         self._symbol_cooldowns: dict[str, float] = {}
-        self._daily_trade_count = 0
-        self._daily_trade_date: str = ""
 
     @abstractmethod
     def get_timeframes(self) -> list[str]:
@@ -113,9 +86,6 @@ class BaseBot(ABC):
         return list(symbols)
 
     async def _get_filtered_symbols(self) -> list[str]:
-        top = await get_top_symbols_by_volume(self.exchange)
-        if top:
-            return top
         return self._get_all_tradable_symbols()
 
     def _check_cooldown(self, symbol: str) -> bool:
@@ -125,13 +95,6 @@ class BaseBot(ABC):
 
     def _record_cooldown(self, symbol: str):
         self._symbol_cooldowns[symbol] = time.time()
-
-    def _check_daily_limit(self) -> bool:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if today != self._daily_trade_date:
-            self._daily_trade_count = 0
-            self._daily_trade_date = today
-        return self._daily_trade_count < MAX_DAILY_TRADES
 
     def _get_global_open_count(self) -> int:
         return len(trade_store.get_open_trades())
@@ -184,7 +147,7 @@ class BaseBot(ABC):
         bot_max = MAX_OPEN_TRADES.get(self.bot_type.value, 3)
         global_open = self._get_global_open_count()
         bot_open = len(self.active_trades)
-        can_open = bot_open < bot_max and global_open < GLOBAL_MAX_OPEN and self._check_daily_limit()
+        can_open = bot_open < bot_max and global_open < GLOBAL_MAX_OPEN
 
         sentiment_data = None
         sentiment_interp = {"bias": "neutral", "weight": 0}
@@ -257,10 +220,9 @@ class BaseBot(ABC):
                             )
                             trades_opened += 1
                             self._record_cooldown(symbol)
-                            self._daily_trade_count += 1
                             bot_open += 1
                             global_open += 1
-                            can_open = bot_open < bot_max and global_open < GLOBAL_MAX_OPEN and self._check_daily_limit()
+                            can_open = bot_open < bot_max and global_open < GLOBAL_MAX_OPEN
                             logger.info(
                                 f"{self.bot_type.value} TRADE OPENED: {side.upper()} {symbol} "
                                 f"@ ${entry_price:.4f} pos=${assessment.position_size_usd:.2f} "

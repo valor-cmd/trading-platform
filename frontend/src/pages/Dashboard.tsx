@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -75,6 +75,10 @@ interface RiskStatus {
     swing_pct: number;
     long_term_pct: number;
     arbitrage_pct: number;
+    grid_pct: number;
+    mean_reversion_pct: number;
+    momentum_pct: number;
+    dca_pct: number;
   };
 }
 
@@ -129,14 +133,21 @@ function aggregateToCandles(
 }
 
 const CandlestickBar = (props: any) => {
-  const { x, y, width, height, payload } = props;
-  if (!payload || !payload.high || !payload.low) return null;
+  const { x, width, payload, background } = props;
+  if (!payload || payload.high == null || payload.low == null) return null;
+  if (!background) return null;
   const { open, high, low, close } = payload;
   const isUp = close >= open;
   const color = isUp ? "#00ff88" : "#ff4d6a";
-  const range = high - low || 1;
-  const chartBottom = y + height;
-  const scale = (v: number) => chartBottom - ((v - low) / range) * height;
+  const chartY = background.y;
+  const chartH = background.height;
+  const yDomain = (props as any)._yDomain;
+  const yMin = yDomain?.[0] ?? low;
+  const yMax = yDomain?.[1] ?? high;
+  const range = yMax - yMin || 1;
+  const scale = (v: number) => chartY + chartH - ((v - yMin) / range) * chartH;
+  const wickTop = scale(high);
+  const wickBot = scale(low);
   const bodyTop = scale(Math.max(open, close));
   const bodyBot = scale(Math.min(open, close));
   const bodyH = Math.max(bodyBot - bodyTop, 1);
@@ -144,8 +155,8 @@ const CandlestickBar = (props: any) => {
   const bw = Math.max(width * 0.6, 3);
   return (
     <g>
-      <line x1={cx} y1={scale(high)} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
-      <line x1={cx} y1={bodyBot} x2={cx} y2={scale(low)} stroke={color} strokeWidth={1} />
+      <line x1={cx} y1={wickTop} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
+      <line x1={cx} y1={bodyBot} x2={cx} y2={wickBot} stroke={color} strokeWidth={1} />
       <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} fillOpacity={isUp ? 0.3 : 0.8} stroke={color} strokeWidth={1} rx={1} />
     </g>
   );
@@ -210,6 +221,7 @@ function Dashboard() {
   const [zoomLeft, setZoomLeft] = useState<string | null>(null);
   const [zoomRight, setZoomRight] = useState<string | null>(null);
   const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -382,6 +394,37 @@ function Dashboard() {
     : baseFiltered;
   const candleData = aggregateToCandles(filteredChart, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
 
+  const candleYMin = candleData.length > 0 ? Math.min(...candleData.map(c => c.low)) : 0;
+  const candleYMax = candleData.length > 0 ? Math.max(...candleData.map(c => c.high)) : 100;
+  const candlePad = (candleYMax - candleYMin) * 0.05 || 1;
+  const candleDomain: [number, number] = [candleYMin - candlePad, candleYMax + candlePad];
+
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const data = baseFiltered;
+    if (data.length < 3) return;
+    const current = zoomDomain ?? [0, data.length - 1];
+    const span = current[1] - current[0];
+    const mid = Math.floor((current[0] + current[1]) / 2);
+    const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
+    const newSpan = Math.max(5, Math.min(data.length, Math.round(span * zoomFactor)));
+    let lo = Math.max(0, mid - Math.floor(newSpan / 2));
+    let hi = lo + newSpan;
+    if (hi > data.length - 1) { hi = data.length - 1; lo = Math.max(0, hi - newSpan); }
+    if (newSpan >= data.length - 1) {
+      setZoomDomain(null);
+    } else {
+      setZoomDomain([lo, hi]);
+    }
+  }, [baseFiltered, zoomDomain]);
+
+  useEffect(() => {
+    const el = chartContainerRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
+
   const handleMouseDown = (e: any) => {
     if (e?.activeLabel) setZoomLeft(e.activeLabel);
   };
@@ -451,7 +494,7 @@ function Dashboard() {
           <span style={{ color: "var(--red)" }}>Fees: -${totalFeesPaid.toFixed(5)}</span>
         </div>
 
-        <div className="chart-container" style={{ marginTop: "1rem" }}>
+        <div className="chart-container" ref={chartContainerRef} style={{ marginTop: "1rem", height: 400 }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={chartMode === "candle" ? candleData : filteredChart}
@@ -483,7 +526,7 @@ function Dashboard() {
                 fontSize={10}
                 tickLine={false}
                 axisLine={{ stroke: "#333" }}
-                domain={["auto", "auto"]}
+                domain={chartMode === "candle" ? candleDomain : ["auto", "auto"]}
                 padding={{ top: 10, bottom: 10 }}
                 tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               />
@@ -501,7 +544,7 @@ function Dashboard() {
                   dot={false}
                 />
               ) : (
-                <Bar dataKey="ohlcRange" shape={<CandlestickBar />} isAnimationActive={false} />
+                <Bar dataKey="ohlcRange" shape={<CandlestickBar _yDomain={candleDomain} />} isAnimationActive={false} background={{ fill: "transparent" }} />
               )}
               {showTradeDots && (
                 <Scatter dataKey="buy" shape="circle" fill="#00ff88" isAnimationActive={false}
@@ -730,34 +773,38 @@ function Dashboard() {
           <div className="card-header">
             <h3>Active Bots</h3>
           </div>
-          {["scalper", "swing", "long_term"].map((bot) => (
-            <div className="asset-row" key={bot}>
+          {[
+            { key: "scalper", icon: "S", tf: "5m-15m" },
+            { key: "swing", icon: "W", tf: "1h-4h" },
+            { key: "long_term", icon: "L", tf: "1d-1w" },
+            { key: "grid", icon: "G", tf: "1h-4h" },
+            { key: "mean_reversion", icon: "M", tf: "1h-4h" },
+            { key: "momentum", icon: "P", tf: "4h-1d" },
+            { key: "dca", icon: "D", tf: "1h-4h" },
+          ].map((bot) => (
+            <div className="asset-row" key={bot.key}>
               <div className="asset-info">
-                <div className="asset-icon">
-                  {bot === "scalper" ? "⚡" : bot === "swing" ? "〰" : "📈"}
-                </div>
+                <div className="asset-icon">{bot.icon}</div>
                 <div>
                   <div className="asset-name" style={{ textTransform: "capitalize" }}>
-                    {bot.replace("_", " ")}
+                    {bot.key.replace("_", " ")}
                   </div>
-                  <div className="asset-price">
-                    {bot === "scalper" ? "5m–15m" : bot === "swing" ? "1h–4h" : "1d–1w"}
-                  </div>
+                  <div className="asset-price">{bot.tf}</div>
                 </div>
               </div>
               <div className="asset-value">
-                <div className="asset-amount">{bots[bot]?.active_trades ?? 0}</div>
+                <div className="asset-amount">{bots[bot.key]?.active_trades ?? 0}</div>
                 <div className="asset-usd">open trades</div>
               </div>
             </div>
           ))}
           <div className="asset-row">
             <div className="asset-info">
-              <div className="asset-icon">⇄</div>
+              <div className="asset-icon">A</div>
               <div>
                 <div className="asset-name">Arbitrage</div>
                 <div className="asset-price">
-                  {arbStatus?.running ? "Active" : "Inactive"} · Cross-exchange
+                  {arbStatus?.running ? "Active" : "Inactive"} - Cross-exchange
                 </div>
               </div>
             </div>
@@ -775,15 +822,19 @@ function Dashboard() {
             <h3>Bucket Allocation</h3>
           </div>
           {[
-            { label: "Scalper", pct: risk?.bucket_allocation?.scalper_pct ?? 25, color: "#00ff88" },
-            { label: "Swing", pct: risk?.bucket_allocation?.swing_pct ?? 25, color: "#3b82f6" },
-            { label: "Long-Term", pct: risk?.bucket_allocation?.long_term_pct ?? 25, color: "#a855f7" },
-            { label: "Arbitrage", pct: risk?.bucket_allocation?.arbitrage_pct ?? 25, color: "#ff9f1c" },
+            { label: "Scalper", pct: risk?.bucket_allocation?.scalper_pct ?? 10, color: "#00ff88" },
+            { label: "Swing", pct: risk?.bucket_allocation?.swing_pct ?? 12, color: "#3b82f6" },
+            { label: "Long-Term", pct: risk?.bucket_allocation?.long_term_pct ?? 12, color: "#a855f7" },
+            { label: "Arbitrage", pct: risk?.bucket_allocation?.arbitrage_pct ?? 10, color: "#ff9f1c" },
+            { label: "Grid", pct: risk?.bucket_allocation?.grid_pct ?? 18, color: "#06b6d4" },
+            { label: "Mean Rev", pct: risk?.bucket_allocation?.mean_reversion_pct ?? 14, color: "#f472b6" },
+            { label: "Momentum", pct: risk?.bucket_allocation?.momentum_pct ?? 12, color: "#facc15" },
+            { label: "DCA", pct: risk?.bucket_allocation?.dca_pct ?? 12, color: "#fb923c" },
           ].map((bucket) => (
-            <div key={bucket.label} style={{ marginBottom: "1rem" }}>
-              <div className="flex-between mb-sm">
-                <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{bucket.label}</span>
-                <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <div key={bucket.label} style={{ marginBottom: "0.6rem" }}>
+              <div className="flex-between" style={{ marginBottom: "0.15rem" }}>
+                <span style={{ fontSize: "0.75rem", fontWeight: 500 }}>{bucket.label}</span>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
                   {bucket.pct}%
                 </span>
               </div>

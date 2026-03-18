@@ -25,6 +25,10 @@ from app.bots.scalper import ScalperBot
 from app.bots.swing import SwingBot
 from app.bots.long_term import LongTermBot
 from app.bots.arbitrage import ArbitrageBot
+from app.bots.grid import GridBot
+from app.bots.mean_reversion import MeanReversionBot
+from app.bots.momentum import MomentumBot
+from app.bots.dca import DCABot
 from app.arbitrage.engine import ArbitrageConfig
 from app.indicators.sentiment import SentimentAnalyzer
 from app.core.config import settings
@@ -45,6 +49,10 @@ arb_config = ArbitrageConfig(
     scan_interval_seconds=30,
 )
 arb_bot = ArbitrageBot(exchange_registry, risk_engine, arb_config)
+grid_bot = GridBot(paper_exchange, risk_engine, sentiment_analyzer)
+mean_reversion_bot = MeanReversionBot(paper_exchange, risk_engine, sentiment_analyzer)
+momentum_bot = MomentumBot(paper_exchange, risk_engine, sentiment_analyzer)
+dca_bot = DCABot(paper_exchange, risk_engine, sentiment_analyzer)
 
 _bot_tasks: dict[str, asyncio.Task] = {}
 
@@ -164,7 +172,9 @@ async def lifespan(app: FastAPI):
                     alloc = await risk_engine.rebalance_buckets(usdt, {})
                     logger.info(
                         f"Auto-rebalance: scalper={alloc.scalper_pct}% swing={alloc.swing_pct}% "
-                        f"long_term={alloc.long_term_pct}% arb={alloc.arbitrage_pct}%"
+                        f"long_term={alloc.long_term_pct}% arb={alloc.arbitrage_pct}% "
+                        f"grid={alloc.grid_pct}% mr={alloc.mean_reversion_pct}% "
+                        f"mom={alloc.momentum_pct}% dca={alloc.dca_pct}%"
                     )
             except Exception as e:
                 logger.debug(f"Auto-rebalance error: {e}")
@@ -193,6 +203,10 @@ async def lifespan(app: FastAPI):
     swing_bot.stop()
     long_term_bot.stop()
     arb_bot.stop()
+    grid_bot.stop()
+    mean_reversion_bot.stop()
+    momentum_bot.stop()
+    dca_bot.stop()
     for task in _bot_tasks.values():
         task.cancel()
     await paper_exchange.close_all()
@@ -244,6 +258,10 @@ async def start_bots(exchange_id: str, _auth=Depends(require_auth)):
     _ensure_bot_running("swing", swing_bot.start(exchange_id, interval_seconds=300), _bot_tasks)
     _ensure_bot_running("long_term", long_term_bot.start(exchange_id, interval_seconds=3600), _bot_tasks)
     _ensure_bot_running("arbitrage", arb_bot.start(interval_seconds=30), _bot_tasks)
+    _ensure_bot_running("grid", grid_bot.start(exchange_id, interval_seconds=60), _bot_tasks)
+    _ensure_bot_running("mean_reversion", mean_reversion_bot.start(exchange_id, interval_seconds=120), _bot_tasks)
+    _ensure_bot_running("momentum", momentum_bot.start(exchange_id, interval_seconds=300), _bot_tasks)
+    _ensure_bot_running("dca", dca_bot.start(exchange_id, interval_seconds=180), _bot_tasks)
 
     return {
         "status": "started",
@@ -252,6 +270,10 @@ async def start_bots(exchange_id: str, _auth=Depends(require_auth)):
             "swing": {"interval": "5m", "symbols": len(swing_bot.get_symbols())},
             "long_term": {"interval": "1h", "symbols": len(long_term_bot.get_symbols())},
             "arbitrage": {"interval": "30s", "exchanges": len(exchange_registry.get_connected())},
+            "grid": {"interval": "60s", "symbols": len(grid_bot.get_symbols())},
+            "mean_reversion": {"interval": "2m", "symbols": len(mean_reversion_bot.get_symbols())},
+            "momentum": {"interval": "5m", "symbols": len(momentum_bot.get_symbols())},
+            "dca": {"interval": "3m", "symbols": len(dca_bot.get_symbols())},
         },
         "exchanges": exchange_registry.status(),
     }
@@ -263,6 +285,10 @@ async def stop_bots(_auth=Depends(require_auth)):
     swing_bot.stop()
     long_term_bot.stop()
     arb_bot.stop()
+    grid_bot.stop()
+    mean_reversion_bot.stop()
+    momentum_bot.stop()
+    dca_bot.stop()
     return {"status": "stopped"}
 
 
@@ -273,6 +299,10 @@ async def bots_running():
         "swing": {"running": swing_bot.running, "active_trades": len(swing_bot.active_trades)},
         "long_term": {"running": long_term_bot.running, "active_trades": len(long_term_bot.active_trades)},
         "arbitrage": arb_bot.status(),
+        "grid": {"running": grid_bot.running, "active_trades": len(grid_bot.active_trades)},
+        "mean_reversion": {"running": mean_reversion_bot.running, "active_trades": len(mean_reversion_bot.active_trades)},
+        "momentum": {"running": momentum_bot.running, "active_trades": len(momentum_bot.active_trades)},
+        "dca": {"running": dca_bot.running, "active_trades": len(dca_bot.active_trades)},
     }
 
 

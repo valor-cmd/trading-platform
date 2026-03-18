@@ -47,12 +47,52 @@ REGIME_MIN_SCORES = {
         MarketRegime.VOLATILE: 6.5,
         MarketRegime.CHAOTIC: 99.0,
     },
+    "grid": {
+        MarketRegime.STRONG_TREND_UP: 99.0,
+        MarketRegime.TREND_UP: 99.0,
+        MarketRegime.TREND_DOWN: 99.0,
+        MarketRegime.STRONG_TREND_DOWN: 99.0,
+        MarketRegime.RANGING: 3.0,
+        MarketRegime.VOLATILE: 3.5,
+        MarketRegime.CHAOTIC: 99.0,
+    },
+    "mean_reversion": {
+        MarketRegime.STRONG_TREND_UP: 6.0,
+        MarketRegime.TREND_UP: 5.0,
+        MarketRegime.TREND_DOWN: 5.0,
+        MarketRegime.STRONG_TREND_DOWN: 6.0,
+        MarketRegime.RANGING: 4.0,
+        MarketRegime.VOLATILE: 5.0,
+        MarketRegime.CHAOTIC: 99.0,
+    },
+    "momentum": {
+        MarketRegime.STRONG_TREND_UP: 4.5,
+        MarketRegime.TREND_UP: 5.0,
+        MarketRegime.TREND_DOWN: 5.0,
+        MarketRegime.STRONG_TREND_DOWN: 4.5,
+        MarketRegime.RANGING: 99.0,
+        MarketRegime.VOLATILE: 5.5,
+        MarketRegime.CHAOTIC: 99.0,
+    },
+    "dca": {
+        MarketRegime.STRONG_TREND_UP: 3.0,
+        MarketRegime.TREND_UP: 3.0,
+        MarketRegime.TREND_DOWN: 3.5,
+        MarketRegime.STRONG_TREND_DOWN: 4.0,
+        MarketRegime.RANGING: 3.0,
+        MarketRegime.VOLATILE: 4.0,
+        MarketRegime.CHAOTIC: 99.0,
+    },
 }
 
 MIN_CONFIRMATIONS = {
     "scalper": 3,
     "swing": 4,
     "long_term": 5,
+    "grid": 2,
+    "mean_reversion": 3,
+    "momentum": 3,
+    "dca": 2,
 }
 
 
@@ -247,9 +287,18 @@ def evaluate_confirmation(
     else:
         relevant_confirmations = bearish_confirmations
 
-    directional_score = _score_scalper(signal, side, relevant_confirmations) if bot_type == "scalper" \
-        else _score_swing(signal, side, relevant_confirmations) if bot_type == "swing" \
-        else _score_long_term(signal, side, relevant_confirmations)
+    if bot_type == "scalper":
+        directional_score = _score_scalper(signal, side, relevant_confirmations)
+    elif bot_type == "swing":
+        directional_score = _score_swing(signal, side, relevant_confirmations)
+    elif bot_type in ("mean_reversion", "grid"):
+        directional_score = _score_scalper(signal, side, relevant_confirmations)
+    elif bot_type == "momentum":
+        directional_score = _score_swing(signal, side, relevant_confirmations)
+    elif bot_type == "dca":
+        directional_score = _score_long_term(signal, side, relevant_confirmations)
+    else:
+        directional_score = _score_long_term(signal, side, relevant_confirmations)
 
     sentiment_bias = sentiment.get("bias", "neutral")
     sentiment_weight = sentiment.get("weight", 0)

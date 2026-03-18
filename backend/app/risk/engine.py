@@ -23,14 +23,22 @@ class RiskAssessment:
 
 @dataclass
 class BucketAllocation:
-    scalper_pct: float = 20.0
-    swing_pct: float = 30.0
-    long_term_pct: float = 30.0
-    arbitrage_pct: float = 20.0
+    scalper_pct: float = 10.0
+    swing_pct: float = 12.0
+    long_term_pct: float = 12.0
+    arbitrage_pct: float = 10.0
+    grid_pct: float = 18.0
+    mean_reversion_pct: float = 14.0
+    momentum_pct: float = 12.0
+    dca_pct: float = 12.0
     scalper_used_usd: float = 0.0
     swing_used_usd: float = 0.0
     long_term_used_usd: float = 0.0
     arbitrage_used_usd: float = 0.0
+    grid_used_usd: float = 0.0
+    mean_reversion_used_usd: float = 0.0
+    momentum_used_usd: float = 0.0
+    dca_used_usd: float = 0.0
     total_capital_usd: float = 0.0
 
 
@@ -116,26 +124,16 @@ class RiskEngine:
 
     async def reserve_bucket(self, bot_type: str, amount_usd: float):
         allocation = await self.get_bucket_allocation()
-        if bot_type == "scalper":
-            allocation.scalper_used_usd += amount_usd
-        elif bot_type == "swing":
-            allocation.swing_used_usd += amount_usd
-        elif bot_type == "long_term":
-            allocation.long_term_used_usd += amount_usd
-        elif bot_type == "arbitrage":
-            allocation.arbitrage_used_usd += amount_usd
+        attr = f"{bot_type}_used_usd"
+        if hasattr(allocation, attr):
+            setattr(allocation, attr, getattr(allocation, attr) + amount_usd)
         await self.save_bucket_allocation(allocation)
 
     async def release_bucket(self, bot_type: str, amount_usd: float):
         allocation = await self.get_bucket_allocation()
-        if bot_type == "scalper":
-            allocation.scalper_used_usd = max(0, allocation.scalper_used_usd - amount_usd)
-        elif bot_type == "swing":
-            allocation.swing_used_usd = max(0, allocation.swing_used_usd - amount_usd)
-        elif bot_type == "long_term":
-            allocation.long_term_used_usd = max(0, allocation.long_term_used_usd - amount_usd)
-        elif bot_type == "arbitrage":
-            allocation.arbitrage_used_usd = max(0, allocation.arbitrage_used_usd - amount_usd)
+        attr = f"{bot_type}_used_usd"
+        if hasattr(allocation, attr):
+            setattr(allocation, attr, max(0, getattr(allocation, attr) - amount_usd))
         await self.save_bucket_allocation(allocation)
 
     async def assess_trade(
@@ -164,8 +162,12 @@ class RiskEngine:
             "swing": (allocation.swing_pct, allocation.swing_used_usd),
             "long_term": (allocation.long_term_pct, allocation.long_term_used_usd),
             "arbitrage": (allocation.arbitrage_pct, allocation.arbitrage_used_usd),
+            "grid": (allocation.grid_pct, allocation.grid_used_usd),
+            "mean_reversion": (allocation.mean_reversion_pct, allocation.mean_reversion_used_usd),
+            "momentum": (allocation.momentum_pct, allocation.momentum_used_usd),
+            "dca": (allocation.dca_pct, allocation.dca_used_usd),
         }
-        pct, used = bucket_map.get(bot_type, (20.0, 0.0))
+        pct, used = bucket_map.get(bot_type, (12.0, 0.0))
         bucket_limit = allocation.total_capital_usd * (pct / 100)
         available = max(bucket_limit - used, 0)
 
@@ -179,10 +181,16 @@ class RiskEngine:
                 reasoning=f"Bucket {bot_type} fully allocated (${used:.2f}/${bucket_limit:.2f})", bucket=bot_type,
             )
 
-        risk_pct_map = {"scalper": 1.5, "swing": 2.5, "long_term": 3.0}
+        risk_pct_map = {
+            "scalper": 1.5, "swing": 2.5, "long_term": 3.0,
+            "grid": 2.0, "mean_reversion": 2.0, "momentum": 2.5, "dca": 2.0,
+        }
         risk_pct = risk_pct_map.get(bot_type, 2.0) * min(max(signal_confidence, 0.5), 1.0)
 
-        sl_multiplier_map = {"scalper": 1.0, "swing": 1.5, "long_term": 2.0}
+        sl_multiplier_map = {
+            "scalper": 1.0, "swing": 1.5, "long_term": 2.0,
+            "grid": 0.8, "mean_reversion": 1.0, "momentum": 1.2, "dca": 1.5,
+        }
         sl_multiplier = sl_multiplier_map.get(bot_type, 1.5)
 
         stop_loss = self.calculate_stop_loss(entry_price, side, atr, sl_multiplier)
@@ -199,7 +207,10 @@ class RiskEngine:
                 reasoning="Position size too small", bucket=bot_type,
             )
 
-        rr_ratio_map = {"scalper": 1.5, "swing": 2.0, "long_term": 3.0}
+        rr_ratio_map = {
+            "scalper": 1.5, "swing": 2.0, "long_term": 3.0,
+            "grid": 1.0, "mean_reversion": 1.5, "momentum": 2.5, "dca": 1.5,
+        }
         rr_ratio = rr_ratio_map.get(bot_type, 2.0)
         take_profit = self.calculate_take_profit(entry_price, stop_loss, side, rr_ratio)
 
@@ -236,7 +247,7 @@ class RiskEngine:
 
         from app.core.store import trade_store
         pnl_by_bot = trade_store.pnl_by_bot()
-        bot_types = ["scalper", "swing", "long_term", "arbitrage"]
+        bot_types = ["scalper", "swing", "long_term", "arbitrage", "grid", "mean_reversion", "momentum", "dca"]
         MIN_PCT = 10.0
         TOTAL_PCT = 100.0
         distributable = TOTAL_PCT - (MIN_PCT * len(bot_types))

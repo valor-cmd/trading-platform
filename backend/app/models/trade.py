@@ -23,6 +23,10 @@ class BotType(str, enum.Enum):
     SWING = "swing"
     LONG_TERM = "long_term"
     ARBITRAGE = "arbitrage"
+    GRID = "grid"
+    MEAN_REVERSION = "mean_reversion"
+    MOMENTUM = "momentum"
+    DCA = "dca"
 
 
 class Trade(Base):
