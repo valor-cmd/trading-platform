@@ -60,9 +60,13 @@ interface LivePriceInfo {
 }
 
 const botConfig: Record<string, { icon: string; label: string; timeframes: string; interval: string }> = {
-  scalper: { icon: "⚡", label: "Scalper", timeframes: "5m · 15m", interval: "30s" },
-  swing: { icon: "〰", label: "Swing", timeframes: "1h · 4h", interval: "5m" },
-  long_term: { icon: "📈", label: "Long Term", timeframes: "1d · 1w", interval: "1h" },
+  scalper: { icon: "S", label: "Scalper", timeframes: "5m · 15m", interval: "30s" },
+  swing: { icon: "W", label: "Swing", timeframes: "1h · 4h", interval: "5m" },
+  long_term: { icon: "L", label: "Long Term", timeframes: "1d · 1w", interval: "1h" },
+  grid: { icon: "G", label: "Grid", timeframes: "1h · 4h", interval: "60s" },
+  mean_reversion: { icon: "M", label: "Mean Reversion", timeframes: "1h · 4h", interval: "2m" },
+  momentum: { icon: "P", label: "Momentum", timeframes: "4h · 1d", interval: "5m" },
+  dca: { icon: "D", label: "DCA", timeframes: "1h · 4h", interval: "3m" },
 };
 
 function ExchangeDropdown({ eid, label, pairCount, icon }: { eid: string; label: string; pairCount: number; icon: string }) {
@@ -314,13 +318,14 @@ function Bots() {
       </div>
 
       <div className="tabs mb-md">
-        {["all", "scalper", "swing", "long_term", "arbitrage"].map((tab) => (
+        {["all", "scalper", "swing", "long_term", "grid", "mean_reversion", "momentum", "dca", "arbitrage"].map((tab) => (
           <button
             key={tab}
             className={`tab ${activeTab === tab ? "active" : ""}`}
             onClick={() => setActiveTab(tab)}
+            style={{ fontSize: "0.75rem", padding: "0.4rem 0.6rem" }}
           >
-            {tab === "all" ? "All Bots" : tab === "arbitrage" ? "Arbitrage" : botConfig[tab]?.label}
+            {tab === "all" ? "All" : tab === "arbitrage" ? "Arb" : botConfig[tab]?.label}
           </button>
         ))}
       </div>

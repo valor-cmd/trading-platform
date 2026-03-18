@@ -237,13 +237,13 @@ function Dashboard() {
       const val = (i: number) => results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<any>).value : null;
       const s = val(0);
       const r = val(1);
-      const b = val(2);
       const p = val(3);
+      const br = val(4);
       const ar = val(5);
       const lb = val(6);
       if (s) setSummary(s.data);
       if (r) setRisk(r.data);
-      if (b) setBots(b.data);
+      if (br) setBots(br.data);
       if (ar) setArbStatus(ar.data);
       if (lb) setLiveBalance(lb.data);
 

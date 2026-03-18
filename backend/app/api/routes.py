@@ -489,7 +489,7 @@ async def rebalance(req: RebalanceRequest, _auth=Depends(require_auth)):
 @router.get("/bots/status")
 async def get_bot_status():
     bots = {}
-    for bot_type in ["scalper", "swing", "long_term"]:
+    for bot_type in ["scalper", "swing", "long_term", "grid", "mean_reversion", "momentum", "dca"]:
         trades = await store.hgetall(f"active_trades:{bot_type}")
         bots[bot_type] = {
             "active_trades": len(trades),
