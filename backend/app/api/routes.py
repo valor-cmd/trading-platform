@@ -204,6 +204,25 @@ async def get_ticker(exchange_id: str, symbol: str):
     return ticker
 
 
+@router.get("/market/{exchange_id}/{symbol}/ohlcv")
+async def get_ohlcv(exchange_id: str, symbol: str, timeframe: str = "1h", limit: int = 100):
+    sym = symbol.replace("-", "/")
+    df = await paper_exchange.fetch_ohlcv(exchange_id, sym, timeframe, limit=limit)
+    if df is None or len(df) == 0:
+        return []
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "timestamp": int(row["timestamp"]) if "timestamp" in row else 0,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+    return records
+
+
 @router.get("/market/{exchange_id}/{symbol}/analysis")
 async def get_analysis(exchange_id: str, symbol: str, timeframe: str = "1h"):
     from app.indicators.technical import TechnicalAnalyzer

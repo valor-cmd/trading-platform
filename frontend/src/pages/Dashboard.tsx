@@ -2,13 +2,41 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Scatter, Cell, Bar, ReferenceArea,
+  CartesianGrid, Scatter, Cell, Bar, ReferenceArea, ReferenceLine,
 } from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
-  getLiveBalance, resetAccount,
+  getLiveBalance, resetAccount, getOHLCV,
 } from "../services/api";
+
+interface BotTradeDetail {
+  order_id: string;
+  symbol: string;
+  side: string;
+  entry_price: number;
+  amount: number;
+  position_usd: number;
+  stop_loss: number;
+  take_profit: number | null;
+  opened_at: string;
+  reasoning: string;
+  signal_confidence: number;
+  bot_type: string;
+  regime?: string;
+  strategy?: string;
+  signal_score?: number;
+  confirmations?: string[];
+}
+
+interface OHLCVBar {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
 
 interface Summary {
   summary: {
@@ -224,6 +252,10 @@ function Dashboard() {
   const [showTradeDots, setShowTradeDots] = useState(true);
   const [chartMode, setChartMode] = useState<"line" | "candle">("line");
   const [selectedTrade, setSelectedTrade] = useState<TradeEvent | null>(null);
+  const [activeBotTrades, setActiveBotTrades] = useState<BotTradeDetail[]>([]);
+  const [selectedBotTrade, setSelectedBotTrade] = useState<BotTradeDetail | null>(null);
+  const [tradeOHLCV, setTradeOHLCV] = useState<OHLCVBar[]>([]);
+  const [tradeChartLoading, setTradeChartLoading] = useState(false);
   const [tradeEventsMap, setTradeEventsMap] = useState<Record<string, TradeEvent>>({});
   const [zoomLeft, setZoomLeft] = useState<string | null>(null);
   const [zoomRight, setZoomRight] = useState<string | null>(null);
@@ -377,15 +409,11 @@ function Dashboard() {
   };
 
   const allCandles = aggregateToCandles(chartData, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
+  const visibleCount = zoomDomain ? zoomDomain[1] : DEFAULT_CANDLES;
   const candleData = (() => {
     if (allCandles.length === 0) return [];
-    if (zoomDomain) {
-      return allCandles.slice(
-        Math.max(0, allCandles.length - zoomDomain[1]),
-        allCandles.length - zoomDomain[0],
-      );
-    }
-    return allCandles.slice(-DEFAULT_CANDLES);
+    const count = Math.min(visibleCount, allCandles.length);
+    return allCandles.slice(-count);
   })();
   const filteredChart = candleData.length > 0
     ? candleData.map(c => ({ timestamp: c.timestamp, balance: c.close, buy: c.buy, sell: c.sell, deposit: c.deposit }))
@@ -411,12 +439,10 @@ function Dashboard() {
     const total = allCandles.length;
     if (total < 3) return;
     const maxCandlesForTf = MAX_CANDLES[timeRange] ?? 200;
-    const currentVisible = zoomDomain
-      ? zoomDomain[1] - zoomDomain[0]
-      : Math.min(DEFAULT_CANDLES, total);
+    const currentVisible = zoomDomain ? zoomDomain[1] : DEFAULT_CANDLES;
     const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
     const newVisible = Math.max(MIN_CANDLES, Math.min(maxCandlesForTf, Math.min(total, Math.round(currentVisible * zoomFactor))));
-    if (newVisible >= total) {
+    if (newVisible === DEFAULT_CANDLES) {
       setZoomDomain(null);
     } else {
       setZoomDomain([0, newVisible]);
@@ -795,8 +821,25 @@ function Dashboard() {
                   <div className="asset-price">{bot.tf}</div>
                 </div>
               </div>
-              <div className="asset-value">
-                <div className="asset-amount">{bots[bot.key]?.active_trades ?? 0}</div>
+              <div className="asset-value" style={{ cursor: (bots[bot.key]?.active_trades ?? 0) > 0 ? "pointer" : "default" }} onClick={async () => {
+                const count = bots[bot.key]?.active_trades ?? 0;
+                if (count === 0) return;
+                try {
+                  const res = await getBotStatus();
+                  const botData = res.data?.[bot.key];
+                  if (botData?.trades?.length > 0) {
+                    setActiveBotTrades(botData.trades);
+                    const trade = botData.trades[0];
+                    setSelectedBotTrade(trade);
+                    setTradeChartLoading(true);
+                    const sym = trade.symbol.replace("/", "-");
+                    const ohlcvRes = await getOHLCV("paper", sym, "5m", 100);
+                    setTradeOHLCV(ohlcvRes.data || []);
+                    setTradeChartLoading(false);
+                  }
+                } catch { /* */ }
+              }}>
+                <div className="asset-amount" style={{ color: (bots[bot.key]?.active_trades ?? 0) > 0 ? "var(--accent)" : undefined, textDecoration: (bots[bot.key]?.active_trades ?? 0) > 0 ? "underline" : undefined }}>{bots[bot.key]?.active_trades ?? 0}</div>
                 <div className="asset-usd">open trades</div>
               </div>
             </div>
@@ -856,6 +899,218 @@ function Dashboard() {
           </div>
         </div>
       </div>
+      {selectedBotTrade && (
+        <div
+          onClick={() => { setSelectedBotTrade(null); setActiveBotTrades([]); setTradeOHLCV([]); }}
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.8)", zIndex: 1000,
+            display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem",
+            overflow: "auto",
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: "#1a1a1a", border: "1px solid #333", borderRadius: 16,
+            padding: "1.5rem", maxWidth: 700, width: "100%", position: "relative",
+          }}>
+            <button onClick={() => { setSelectedBotTrade(null); setActiveBotTrades([]); setTradeOHLCV([]); }} style={{
+              position: "absolute", top: 12, right: 16, background: "transparent",
+              border: "none", color: "#888", fontSize: "1.2rem", cursor: "pointer",
+            }}>x</button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "1.2rem", fontWeight: 700,
+                background: selectedBotTrade.side === "buy" ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)",
+                color: selectedBotTrade.side === "buy" ? "#00ff88" : "#ff4d6a",
+              }}>{selectedBotTrade.side === "buy" ? "B" : "S"}</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>{selectedBotTrade.symbol}</div>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <span style={{
+                    fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: 20,
+                    background: selectedBotTrade.side === "buy" ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)",
+                    color: selectedBotTrade.side === "buy" ? "#00ff88" : "#ff4d6a", fontWeight: 600,
+                  }}>{selectedBotTrade.side.toUpperCase()}</span>
+                  <span style={{
+                    fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: 20,
+                    background: "rgba(255,255,255,0.08)", color: "#aaa", fontWeight: 500, textTransform: "capitalize",
+                  }}>{selectedBotTrade.bot_type.replace("_", " ")} bot</span>
+                  {selectedBotTrade.regime && <span style={{
+                    fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: 20,
+                    background: "rgba(59,130,246,0.15)", color: "#3b82f6", fontWeight: 500,
+                  }}>{selectedBotTrade.regime.replace(/_/g, " ")}</span>}
+                </div>
+              </div>
+            </div>
+
+            {activeBotTrades.length > 1 && (
+              <div style={{ display: "flex", gap: "0.4rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+                {activeBotTrades.map((t, i) => (
+                  <button key={t.order_id} onClick={async () => {
+                    setSelectedBotTrade(t);
+                    setTradeChartLoading(true);
+                    try {
+                      const sym = t.symbol.replace("/", "-");
+                      const r = await getOHLCV("paper", sym, "5m", 100);
+                      setTradeOHLCV(r.data || []);
+                    } catch { setTradeOHLCV([]); }
+                    setTradeChartLoading(false);
+                  }} style={{
+                    padding: "0.3rem 0.6rem", fontSize: "0.7rem", borderRadius: 20, cursor: "pointer",
+                    background: selectedBotTrade.order_id === t.order_id ? "rgba(0,255,136,0.2)" : "rgba(255,255,255,0.06)",
+                    border: selectedBotTrade.order_id === t.order_id ? "1px solid #00ff88" : "1px solid #333",
+                    color: selectedBotTrade.order_id === t.order_id ? "#00ff88" : "#aaa",
+                  }}>{t.symbol} #{i + 1}</button>
+                ))}
+              </div>
+            )}
+
+            <div style={{ height: 280, marginBottom: "1rem" }}>
+              {tradeChartLoading ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#666" }}>Loading chart...</div>
+              ) : tradeOHLCV.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={tradeOHLCV.map(c => ({
+                    time: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                    open: c.open, high: c.high, low: c.low, close: c.close,
+                    ohlcRange: [Math.min(c.open, c.close), Math.max(c.open, c.close)],
+                  }))} margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="time" stroke="#555" fontSize={9} tickLine={false} minTickGap={60} />
+                    <YAxis orientation="right" stroke="#555" fontSize={9} tickLine={false}
+                      domain={(() => {
+                        const prices = tradeOHLCV.flatMap(c => [c.open, c.close, c.high, c.low]);
+                        const allPrices = [...prices, selectedBotTrade.entry_price, selectedBotTrade.stop_loss, ...(selectedBotTrade.take_profit ? [selectedBotTrade.take_profit] : [])];
+                        const lo = Math.min(...allPrices);
+                        const hi = Math.max(...allPrices);
+                        const pad = (hi - lo) * 0.15 || hi * 0.01;
+                        return [Math.max(0, lo - pad), hi + pad];
+                      })()}
+                      tickFormatter={(v: number) => v < 0.01 ? v.toExponential(2) : `$${v.toFixed(v < 1 ? 6 : 2)}`}
+                    />
+                    <Tooltip content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0]?.payload;
+                      if (!d) return null;
+                      const isUp = d.close >= d.open;
+                      return (
+                        <div style={{ background: "#1e1e1e", border: "1px solid #222", borderRadius: 8, padding: "6px 10px", fontSize: "0.75rem" }}>
+                          <div style={{ color: "#888" }}>{d.time}</div>
+                          <div style={{ color: isUp ? "#00ff88" : "#ff4d6a" }}>O:{d.open.toFixed(8)} C:{d.close.toFixed(8)}</div>
+                          <div style={{ color: "#888" }}>H:{d.high.toFixed(8)} L:{d.low.toFixed(8)}</div>
+                        </div>
+                      );
+                    }} />
+                    <Bar dataKey="ohlcRange" isAnimationActive={false} background={{ fill: "transparent" }}
+                      shape={(props: any) => {
+                        const { x, width, payload, background: bg } = props;
+                        if (!payload || !bg) return null;
+                        const { open, high, low, close } = payload;
+                        const isUp = close >= open;
+                        const color = isUp ? "#00ff88" : "#ff4d6a";
+                        const chartY = bg.y; const chartH = bg.height;
+                        const allP = tradeOHLCV.flatMap(c => [c.open, c.close, c.high, c.low]);
+                        const extP = [...allP, selectedBotTrade.entry_price, selectedBotTrade.stop_loss, ...(selectedBotTrade.take_profit ? [selectedBotTrade.take_profit] : [])];
+                        const yMin = Math.min(...extP); const yMax = Math.max(...extP);
+                        const pad = (yMax - yMin) * 0.15 || yMax * 0.01;
+                        const domLo = Math.max(0, yMin - pad); const domHi = yMax + pad;
+                        const range = domHi - domLo || 1;
+                        const sc = (v: number) => chartY + chartH - ((v - domLo) / range) * chartH;
+                        const bTop = sc(Math.max(open, close)); const bBot = sc(Math.min(open, close));
+                        const bH = Math.max(bBot - bTop, 1);
+                        const cx = x + width / 2; const bw = Math.max(width * 0.6, 2);
+                        return (<g>
+                          <line x1={cx} y1={sc(high)} x2={cx} y2={bTop} stroke={color} strokeWidth={1} />
+                          <line x1={cx} y1={bBot} x2={cx} y2={sc(low)} stroke={color} strokeWidth={1} />
+                          <rect x={cx - bw / 2} y={bTop} width={bw} height={bH} fill={color} fillOpacity={isUp ? 0.3 : 0.8} stroke={color} strokeWidth={1} rx={1} />
+                        </g>);
+                      }}
+                    />
+                    <ReferenceLine y={selectedBotTrade.entry_price} stroke="#3b82f6" strokeDasharray="5 3" strokeWidth={2}
+                      label={{ value: `Entry $${selectedBotTrade.entry_price < 0.01 ? selectedBotTrade.entry_price.toExponential(3) : selectedBotTrade.entry_price.toFixed(6)}`, position: "left", fill: "#3b82f6", fontSize: 10 }} />
+                    <ReferenceLine y={selectedBotTrade.stop_loss} stroke="#ff4d6a" strokeDasharray="4 4" strokeWidth={1.5}
+                      label={{ value: `SL $${selectedBotTrade.stop_loss < 0.01 ? selectedBotTrade.stop_loss.toExponential(3) : selectedBotTrade.stop_loss.toFixed(6)}`, position: "left", fill: "#ff4d6a", fontSize: 10 }} />
+                    {selectedBotTrade.take_profit && (
+                      <ReferenceLine y={selectedBotTrade.take_profit} stroke="#00ff88" strokeDasharray="4 4" strokeWidth={1.5}
+                        label={{ value: `TP $${selectedBotTrade.take_profit < 0.01 ? selectedBotTrade.take_profit.toExponential(3) : selectedBotTrade.take_profit.toFixed(6)}`, position: "left", fill: "#00ff88", fontSize: 10 }} />
+                    )}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#666", fontSize: "0.85rem" }}>
+                  No chart data available for this symbol
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: "1px solid #333", paddingTop: "0.75rem" }}>
+              {[
+                { label: "Entry Price", value: `$${selectedBotTrade.entry_price < 0.01 ? selectedBotTrade.entry_price.toExponential(4) : selectedBotTrade.entry_price.toFixed(8)}` },
+                { label: "Position Size", value: `$${selectedBotTrade.position_usd.toFixed(2)}` },
+                { label: "Quantity", value: selectedBotTrade.amount.toFixed(4) },
+                { label: "Stop Loss", value: `$${selectedBotTrade.stop_loss < 0.01 ? selectedBotTrade.stop_loss.toExponential(4) : selectedBotTrade.stop_loss.toFixed(8)}`, cls: "negative" },
+                { label: "Take Profit", value: selectedBotTrade.take_profit ? `$${selectedBotTrade.take_profit < 0.01 ? selectedBotTrade.take_profit.toExponential(4) : selectedBotTrade.take_profit.toFixed(8)}` : "None", cls: "positive" },
+                { label: "Confidence", value: `${(selectedBotTrade.signal_confidence * 100).toFixed(1)}%` },
+                { label: "Signal Score", value: String(selectedBotTrade.signal_score ?? "--") },
+                { label: "Opened", value: new Date(selectedBotTrade.opened_at).toLocaleString() },
+              ].map((row: { label: string; value: string; cls?: string }) => (
+                <div key={row.label} style={{ display: "flex", justifyContent: "space-between", padding: "0.35rem 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                  <span style={{ fontSize: "0.8rem", color: "#888" }}>{row.label}</span>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 600 }} className={row.cls ?? ""}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+
+            {selectedBotTrade.stop_loss > 0 && selectedBotTrade.take_profit && selectedBotTrade.take_profit > 0 && (
+              <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
+                <div style={{ fontSize: "0.7rem", color: "#888", marginBottom: "0.4rem", fontWeight: 600 }}>Risk/Reward</div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#333", position: "relative", overflow: "hidden" }}>
+                    {(() => {
+                      const riskD = Math.abs(selectedBotTrade.entry_price - selectedBotTrade.stop_loss);
+                      const rewD = Math.abs(selectedBotTrade.take_profit! - selectedBotTrade.entry_price);
+                      const total = riskD + rewD;
+                      const riskPct = total > 0 ? (riskD / total) * 100 : 50;
+                      return (<>
+                        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${riskPct}%`, background: "#ff4d6a", borderRadius: 3 }} />
+                        <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: `${100 - riskPct}%`, background: "#00ff88", borderRadius: 3 }} />
+                      </>);
+                    })()}
+                  </div>
+                  <span style={{ fontSize: "0.7rem", color: "#aaa", whiteSpace: "nowrap" }}>
+                    1:{(Math.abs(selectedBotTrade.take_profit! - selectedBotTrade.entry_price) / (Math.abs(selectedBotTrade.entry_price - selectedBotTrade.stop_loss) || 1)).toFixed(1)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {selectedBotTrade.strategy && (
+              <div style={{ marginTop: "0.75rem", padding: "0.6rem", background: "rgba(59,130,246,0.06)", borderRadius: 8 }}>
+                <div style={{ fontSize: "0.7rem", color: "#3b82f6", fontWeight: 600, marginBottom: "0.3rem" }}>Strategy</div>
+                <div style={{ fontSize: "0.75rem", color: "#aaa", lineHeight: 1.4 }}>{selectedBotTrade.strategy}</div>
+              </div>
+            )}
+
+            {selectedBotTrade.confirmations && selectedBotTrade.confirmations.length > 0 && (
+              <div style={{ marginTop: "0.5rem", padding: "0.6rem", background: "rgba(255,255,255,0.03)", borderRadius: 8 }}>
+                <div style={{ fontSize: "0.7rem", color: "#888", fontWeight: 600, marginBottom: "0.3rem" }}>Confirmations ({selectedBotTrade.confirmations.length})</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                  {selectedBotTrade.confirmations.map((c, i) => (
+                    <span key={i} style={{ fontSize: "0.65rem", padding: "0.15rem 0.5rem", borderRadius: 20, background: "rgba(0,255,136,0.08)", color: "#00ff88" }}>{c}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedBotTrade.reasoning && (
+              <div style={{ marginTop: "0.5rem", fontSize: "0.7rem", color: "#666", fontStyle: "italic" }}>{selectedBotTrade.reasoning}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {selectedTrade && (
         <div
           onClick={() => setSelectedTrade(null)}

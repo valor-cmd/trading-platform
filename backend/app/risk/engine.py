@@ -182,10 +182,14 @@ class RiskEngine:
             )
 
         risk_pct_map = {
-            "scalper": 1.5, "swing": 2.5, "long_term": 3.0,
-            "grid": 2.0, "mean_reversion": 2.0, "momentum": 2.5, "dca": 2.0,
+            "scalper": 3.0, "swing": 4.0, "long_term": 5.0,
+            "grid": 4.0, "mean_reversion": 4.0, "momentum": 5.0, "dca": 4.0,
         }
-        risk_pct = risk_pct_map.get(bot_type, 2.0) * min(max(signal_confidence, 0.5), 1.0)
+        small_account = allocation.total_capital_usd < 500
+        base_risk = risk_pct_map.get(bot_type, 3.0)
+        if small_account:
+            base_risk *= 2.0
+        risk_pct = base_risk * min(max(signal_confidence, 0.5), 1.0)
 
         sl_multiplier_map = {
             "scalper": 1.0, "swing": 1.5, "long_term": 2.0,
@@ -200,7 +204,8 @@ class RiskEngine:
         max_per_trade = allocation.total_capital_usd * 0.15
         position_size = min(position_size, max_per_trade)
 
-        if position_size < 3.0:
+        min_pos = 3.0 if allocation.total_capital_usd >= 500 else 1.0
+        if position_size < min_pos:
             return RiskAssessment(
                 approved=False, position_size_usd=0, stop_loss_price=stop_loss,
                 take_profit_price=None, risk_reward_ratio=0, max_loss_usd=0,
@@ -248,7 +253,7 @@ class RiskEngine:
         from app.core.store import trade_store
         pnl_by_bot = trade_store.pnl_by_bot()
         bot_types = ["scalper", "swing", "long_term", "arbitrage", "grid", "mean_reversion", "momentum", "dca"]
-        MIN_PCT = 10.0
+        MIN_PCT = 5.0
         TOTAL_PCT = 100.0
         distributable = TOTAL_PCT - (MIN_PCT * len(bot_types))
 

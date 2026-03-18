@@ -25,6 +25,9 @@ export const getTicker = (exchangeId: string, symbol: string) =>
 export const getAnalysis = (exchangeId: string, symbol: string, timeframe = "1h") =>
   api.get(`/market/${exchangeId}/${symbol}/analysis`, { params: { timeframe } });
 
+export const getOHLCV = (exchangeId: string, symbol: string, timeframe = "1h", limit = 100) =>
+  api.get(`/market/${exchangeId}/${symbol}/ohlcv`, { params: { timeframe, limit } });
+
 export const getAccountingSummary = () => api.get("/accounting/summary");
 
 export const getPnl = (days = 30) => api.get("/accounting/pnl", { params: { days } });
