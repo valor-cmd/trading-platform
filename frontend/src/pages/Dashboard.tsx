@@ -129,10 +129,7 @@ const INTERVAL_MS: Record<string, number> = {
 
 const DEFAULT_CANDLES = 60;
 const MIN_CANDLES = 5;
-const MAX_CANDLES: Record<string, number> = {
-  "1M": 300, "5M": 180, "15M": 120, "1H": 168,
-  "4H": 180, "1D": 365, "1W": 104,
-};
+const MAX_CANDLES = 300;
 
 function aggregateToCandles(
   data: { timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[],
@@ -268,7 +265,7 @@ function Dashboard() {
         getAccountingSummary(),
         getRiskStatus(),
         getBotStatus(),
-        getPortfolioChart(500),
+        getPortfolioChart(2000),
         getBotsRunning(),
         getArbStatus(),
         getLiveBalance(),
@@ -421,9 +418,8 @@ function Dashboard() {
 
   const candleDomain: [number, number] = (() => {
     if (candleData.length === 0) return [0, 100] as [number, number];
-    const skipFirst = candleData.length > 2 ? candleData.slice(1) : candleData;
-    const allHighs = skipFirst.map(c => Math.max(c.open, c.close, c.high));
-    const allLows = skipFirst.map(c => Math.min(c.open, c.close, c.low));
+    const allHighs = candleData.map(c => Math.max(c.open, c.close, c.high));
+    const allLows = candleData.map(c => Math.min(c.open, c.close, c.low));
     const dataHigh = Math.max(...allHighs);
     const dataLow = Math.min(...allLows);
     const range = dataHigh - dataLow || 1;
@@ -438,7 +434,7 @@ function Dashboard() {
     e.preventDefault();
     const total = allCandles.length;
     if (total < 3) return;
-    const maxCandlesForTf = MAX_CANDLES[timeRange] ?? 200;
+    const maxCandlesForTf = MAX_CANDLES;
     const currentVisible = zoomDomain ? zoomDomain[1] : DEFAULT_CANDLES;
     const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
     const newVisible = Math.max(MIN_CANDLES, Math.min(maxCandlesForTf, Math.min(total, Math.round(currentVisible * zoomFactor))));
