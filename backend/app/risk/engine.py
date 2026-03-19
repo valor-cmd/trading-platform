@@ -154,8 +154,6 @@ class RiskEngine:
 
         real_balance = self._get_real_usdt_balance()
         allocation = await self.get_bucket_allocation()
-        if real_balance > 0:
-            allocation.total_capital_usd = min(allocation.total_capital_usd, real_balance)
 
         bucket_map = {
             "scalper": (allocation.scalper_pct, allocation.scalper_used_usd),
@@ -171,9 +169,6 @@ class RiskEngine:
         bucket_limit = allocation.total_capital_usd * (pct / 100)
         available = max(bucket_limit - used, 0)
 
-        if real_balance > 0:
-            available = min(available, max(real_balance * 0.9, 0))
-
         if available < 1.0:
             return RiskAssessment(
                 approved=False, position_size_usd=0, stop_loss_price=0,
@@ -182,13 +177,10 @@ class RiskEngine:
             )
 
         risk_pct_map = {
-            "scalper": 3.0, "swing": 4.0, "long_term": 5.0,
-            "grid": 4.0, "mean_reversion": 4.0, "momentum": 5.0, "dca": 4.0,
+            "scalper": 8.0, "swing": 10.0, "long_term": 10.0,
+            "grid": 8.0, "mean_reversion": 8.0, "momentum": 10.0, "dca": 8.0,
         }
-        small_account = allocation.total_capital_usd < 500
-        base_risk = risk_pct_map.get(bot_type, 3.0)
-        if small_account:
-            base_risk *= 2.0
+        base_risk = risk_pct_map.get(bot_type, 8.0)
         risk_pct = base_risk * min(max(signal_confidence, 0.5), 1.0)
 
         sl_multiplier_map = {
@@ -201,10 +193,10 @@ class RiskEngine:
         position_size = self.calculate_position_size(available, risk_pct, entry_price, stop_loss, fee_rate)
         position_size = min(position_size, available)
 
-        max_per_trade = allocation.total_capital_usd * 0.15
+        max_per_trade = allocation.total_capital_usd * 0.35
         position_size = min(position_size, max_per_trade)
 
-        min_pos = 3.0 if allocation.total_capital_usd >= 500 else 1.0
+        min_pos = 1.0
         if position_size < min_pos:
             return RiskAssessment(
                 approved=False, position_size_usd=0, stop_loss_price=stop_loss,
@@ -243,10 +235,6 @@ class RiskEngine:
         )
 
     async def rebalance_buckets(self, total_capital: float, open_positions: dict):
-        real_balance = self._get_real_usdt_balance()
-        if real_balance > 0:
-            total_capital = min(total_capital, real_balance)
-
         allocation = await self.get_bucket_allocation()
         allocation.total_capital_usd = total_capital
 

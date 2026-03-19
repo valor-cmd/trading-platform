@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     fear_greed_api_url: str = "https://api.alternative.me/fng/"
 
     max_position_size_usd: float = 500.0
-    max_daily_loss_usd: float = 5.0
+    max_daily_loss_usd: float = 50.0
     default_stop_loss_pct: float = 2.0
     max_leverage: float = 3.0
 

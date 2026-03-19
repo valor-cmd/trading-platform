@@ -167,9 +167,9 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(300)
             try:
-                usdt = paper_exchange.balances.get("USDT", 0)
-                if usdt > 0:
-                    alloc = await risk_engine.rebalance_buckets(usdt, {})
+                total_val = _fast_live_balance()
+                if total_val > 0:
+                    alloc = await risk_engine.rebalance_buckets(total_val, {})
                     logger.info(
                         f"Auto-rebalance: scalper={alloc.scalper_pct}% swing={alloc.swing_pct}% "
                         f"long_term={alloc.long_term_pct}% arb={alloc.arbitrage_pct}% "

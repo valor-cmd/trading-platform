@@ -19,34 +19,34 @@ from app.models.trade import BotType
 logger = logging.getLogger(__name__)
 
 MAX_OPEN_TRADES = {
-    "scalper": 5,
-    "swing": 5,
+    "scalper": 10,
+    "swing": 8,
     "long_term": 8,
     "grid": 10,
-    "mean_reversion": 5,
-    "momentum": 5,
-    "dca": 8,
+    "mean_reversion": 8,
+    "momentum": 8,
+    "dca": 10,
 }
-GLOBAL_MAX_OPEN = 40
+GLOBAL_MAX_OPEN = 60
 SYMBOL_COOLDOWN_SECONDS = {
-    "scalper": 1800,
-    "swing": 7200,
-    "long_term": 43200,
-    "grid": 600,
-    "mean_reversion": 1800,
-    "momentum": 3600,
-    "dca": 3600,
+    "scalper": 300,
+    "swing": 1800,
+    "long_term": 7200,
+    "grid": 120,
+    "mean_reversion": 300,
+    "momentum": 600,
+    "dca": 600,
 }
 MIN_CONFIDENCE = {
-    "scalper": 0.35,
-    "swing": 0.30,
-    "long_term": 0.25,
+    "scalper": 0.20,
+    "swing": 0.20,
+    "long_term": 0.15,
     "grid": 0.0,
-    "mean_reversion": 0.20,
-    "momentum": 0.30,
+    "mean_reversion": 0.10,
+    "momentum": 0.20,
     "dca": 0.0,
 }
-MIN_POSITION_USD = 3.0
+MIN_POSITION_USD = 1.0
 
 
 class BaseBot(ABC):
