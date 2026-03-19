@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import traceback
 from abc import ABC, abstractmethod
@@ -17,6 +18,29 @@ from app.risk.engine import RiskEngine, RiskAssessment
 from app.models.trade import BotType
 
 logger = logging.getLogger(__name__)
+
+QUALITY_BASES = {
+    "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "AVAX", "DOT", "MATIC", "LINK",
+    "UNI", "ATOM", "LTC", "BCH", "NEAR", "FIL", "APT", "ARB", "OP", "INJ",
+    "SUI", "SEI", "TIA", "DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI",
+    "FET", "RNDR", "TAO", "AAVE", "MKR", "CRV", "LDO", "RUNE", "DYDX",
+    "SNX", "COMP", "SUSHI", "IMX", "MANA", "SAND", "AXS", "GALA", "ENJ",
+    "ALGO", "ICP", "HBAR", "VET", "EOS", "XLM", "TRX", "TON", "FTM",
+    "THETA", "GRT", "STX", "ENS", "BLUR", "JUP", "W", "PYTH", "JTO",
+    "PENDLE", "ENA", "ETHFI", "WLD", "STRK", "ZK", "EIGEN", "RENDER",
+    "ORDI", "1000SATS", "PEOPLE", "NOT", "JASMY", "LUNC", "CHZ", "CKB",
+    "FLOW", "MINA", "ZIL", "ONE", "CELO", "ROSE", "KAS", "XTZ",
+    "EGLD", "QNT", "KDA", "CFX", "AGIX", "OCEAN", "RPL", "SSV",
+    "GMX", "CAKE", "JOE", "RAY", "ORCA", "OSMO",
+}
+
+LEVERAGED_PATTERN = re.compile(
+    r"(\d+[SL]|UP|DOWN|BULL|BEAR|HALF|HEDGE)",
+    re.IGNORECASE,
+)
+
+MIN_PRICE_USD = 0.0001
+CEX_ONLY_EXCHANGES = {"binance", "coinbase", "kraken", "kucoin", "okx", "bybit", "gateio", "bitget", "mexc"}
 
 MAX_OPEN_TRADES = {
     "scalper": 10,
@@ -76,17 +100,24 @@ class BaseBot(ABC):
         pass
 
     def _get_all_tradable_symbols(self) -> list[str]:
-        symbols = set()
-        for eid, adapter in exchange_registry.get_all().items():
-            if adapter.is_connected():
-                for sym in adapter.get_all_symbols():
-                    symbols.add(sym)
-        cex_symbols = set(self.exchange.get_all_symbols())
-        symbols.update(cex_symbols)
+        symbols = set(self.exchange.get_all_symbols())
         return list(symbols)
 
     async def _get_filtered_symbols(self) -> list[str]:
-        return self._get_all_tradable_symbols()
+        raw = self._get_all_tradable_symbols()
+        filtered = []
+        for sym in raw:
+            if "/" not in sym:
+                continue
+            base, quote = sym.split("/", 1)
+            if quote not in ("USDT", "USDC", "USD", "BUSD"):
+                continue
+            if LEVERAGED_PATTERN.search(base):
+                continue
+            if base not in QUALITY_BASES:
+                continue
+            filtered.append(sym)
+        return filtered
 
     def _check_cooldown(self, symbol: str) -> bool:
         cooldown = SYMBOL_COOLDOWN_SECONDS.get(self.bot_type.value, 3600)
@@ -202,6 +233,17 @@ class BaseBot(ABC):
 
                         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
                         entry_price = ticker["last"]
+                        if entry_price < MIN_PRICE_USD:
+                            self._last_scan_results[symbol] = f"price too low: ${entry_price}"
+                            continue
+
+                        bid = ticker.get("bid") or entry_price
+                        ask = ticker.get("ask") or entry_price
+                        spread_pct = (ask - bid) / entry_price * 100 if entry_price > 0 else 0
+                        if spread_pct > 1.0:
+                            self._last_scan_results[symbol] = f"spread too wide: {spread_pct:.2f}%"
+                            continue
+
                         fee_rate = await self.exchange.get_trading_fee(exchange_id, symbol)
 
                         assessment = await self.risk.assess_trade(
@@ -214,6 +256,11 @@ class BaseBot(ABC):
                             continue
 
                         if assessment.approved:
+                            sl_pct = abs(entry_price - assessment.stop_loss_price) / entry_price * 100 if entry_price > 0 else 0
+                            if sl_pct < spread_pct * 2:
+                                self._last_scan_results[symbol] = f"SL too tight vs spread: SL={sl_pct:.3f}% < 2*spread={spread_pct*2:.3f}%"
+                                await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
+                                continue
                             await self.execute_trade(
                                 exchange_id, symbol, signal, assessment,
                                 fee_rate, side, confirmation,
