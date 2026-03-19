@@ -522,8 +522,37 @@ def get_ledger():
     return trade_store.get_ledger()
 
 
+class UpdateConfigRequest(BaseModel):
+    max_daily_loss_usd: Optional[float] = None
+    max_position_size_usd: Optional[float] = None
+    default_stop_loss_pct: Optional[float] = None
+    max_leverage: Optional[float] = None
+
+
 @router.get("/config")
 async def get_config():
+    return {
+        "max_position_size_usd": settings.max_position_size_usd,
+        "max_daily_loss_usd": settings.max_daily_loss_usd,
+        "default_stop_loss_pct": settings.default_stop_loss_pct,
+        "max_leverage": settings.max_leverage,
+        "paper_trading": settings.paper_trading,
+    }
+
+
+@router.post("/config")
+async def update_config(req: UpdateConfigRequest, _auth=Depends(require_auth)):
+    if req.max_daily_loss_usd is not None:
+        settings.max_daily_loss_usd = req.max_daily_loss_usd
+        risk_engine.max_daily_loss = req.max_daily_loss_usd
+    if req.max_position_size_usd is not None:
+        settings.max_position_size_usd = req.max_position_size_usd
+    if req.default_stop_loss_pct is not None:
+        settings.default_stop_loss_pct = req.default_stop_loss_pct
+        risk_engine.default_sl_pct = req.default_stop_loss_pct
+    if req.max_leverage is not None:
+        settings.max_leverage = req.max_leverage
+        risk_engine.max_leverage = req.max_leverage
     return {
         "max_position_size_usd": settings.max_position_size_usd,
         "max_daily_loss_usd": settings.max_daily_loss_usd,

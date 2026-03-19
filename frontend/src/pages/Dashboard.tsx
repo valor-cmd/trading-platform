@@ -7,7 +7,7 @@ import {
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
-  getLiveBalance, resetAccount, getOHLCV,
+  getLiveBalance, resetAccount, getOHLCV, getConfig, updateConfig,
 } from "../services/api";
 
 interface BotTradeDetail {
@@ -287,6 +287,10 @@ function Dashboard() {
   const [zoomLeft, setZoomLeft] = useState<string | null>(null);
   const [zoomRight, setZoomRight] = useState<string | null>(null);
   const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null);
+  const [riskCfg, setRiskCfg] = useState({ max_daily_loss_usd: 50, max_position_size_usd: 500, default_stop_loss_pct: 2, max_leverage: 3 });
+  const [riskCfgDraft, setRiskCfgDraft] = useState(riskCfg);
+  const [riskCfgSaving, setRiskCfgSaving] = useState(false);
+  const [riskCfgMsg, setRiskCfgMsg] = useState("");
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -387,6 +391,11 @@ function Dashboard() {
 
   useEffect(() => {
     load();
+    getConfig().then((r) => {
+      const c = { max_daily_loss_usd: r.data.max_daily_loss_usd, max_position_size_usd: r.data.max_position_size_usd, default_stop_loss_pct: r.data.default_stop_loss_pct, max_leverage: r.data.max_leverage };
+      setRiskCfg(c);
+      setRiskCfgDraft(c);
+    }).catch(() => {});
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -918,10 +927,73 @@ function Dashboard() {
               </div>
             </div>
           ))}
-          <div className="divider" />
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <h3>Risk Configuration</h3>
+          </div>
+          {[
+            { key: "max_daily_loss_usd" as const, label: "Max Daily Loss (USD)", prefix: "$", step: 5 },
+            { key: "max_position_size_usd" as const, label: "Max Position Size (USD)", prefix: "$", step: 50 },
+            { key: "default_stop_loss_pct" as const, label: "Default Stop Loss (%)", prefix: "", step: 0.5 },
+            { key: "max_leverage" as const, label: "Max Leverage", prefix: "", step: 1 },
+          ].map((field) => (
+            <div key={field.key} style={{ marginBottom: "0.75rem" }}>
+              <div style={{ fontSize: "0.72rem", color: "#999", marginBottom: "0.25rem" }}>{field.label}</div>
+              <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                <input
+                  type="number"
+                  step={field.step}
+                  min={0}
+                  value={riskCfgDraft[field.key]}
+                  onChange={(e) => setRiskCfgDraft({ ...riskCfgDraft, [field.key]: parseFloat(e.target.value) || 0 })}
+                  style={{
+                    flex: 1, padding: "0.4rem 0.6rem", background: "#111", border: "1px solid #333",
+                    borderRadius: 8, color: "#fff", fontSize: "0.85rem",
+                  }}
+                />
+                {riskCfgDraft[field.key] !== riskCfg[field.key] && (
+                  <span style={{ fontSize: "0.65rem", color: "#facc15" }}>changed</span>
+                )}
+              </div>
+            </div>
+          ))}
+          <button
+            disabled={riskCfgSaving || JSON.stringify(riskCfgDraft) === JSON.stringify(riskCfg)}
+            onClick={async () => {
+              setRiskCfgSaving(true);
+              setRiskCfgMsg("");
+              try {
+                const res = await updateConfig(riskCfgDraft);
+                const c = { max_daily_loss_usd: res.data.max_daily_loss_usd, max_position_size_usd: res.data.max_position_size_usd, default_stop_loss_pct: res.data.default_stop_loss_pct, max_leverage: res.data.max_leverage };
+                setRiskCfg(c);
+                setRiskCfgDraft(c);
+                setRiskCfgMsg("Saved");
+                setTimeout(() => setRiskCfgMsg(""), 2000);
+              } catch {
+                setRiskCfgMsg("Error saving");
+              }
+              setRiskCfgSaving(false);
+            }}
+            style={{
+              width: "100%", padding: "0.5rem", background: JSON.stringify(riskCfgDraft) === JSON.stringify(riskCfg) ? "#333" : "var(--accent)",
+              border: "none", borderRadius: 8, color: "#000", fontWeight: 600, fontSize: "0.8rem",
+              cursor: JSON.stringify(riskCfgDraft) === JSON.stringify(riskCfg) ? "default" : "pointer",
+              opacity: JSON.stringify(riskCfgDraft) === JSON.stringify(riskCfg) ? 0.5 : 1,
+            }}
+          >
+            {riskCfgSaving ? "Saving..." : "Save Risk Settings"}
+          </button>
+          {riskCfgMsg && <div style={{ fontSize: "0.7rem", color: riskCfgMsg === "Saved" ? "var(--accent)" : "#ff4d6a", marginTop: "0.3rem", textAlign: "center" }}>{riskCfgMsg}</div>}
+          <div className="divider" style={{ margin: "0.6rem 0" }} />
           <div className="flex-between">
-            <span className="text-sm text-secondary">Max daily loss</span>
-            <span className="text-sm font-semibold">${risk?.max_daily_loss_usd ?? 50}</span>
+            <span className="text-sm text-secondary">Daily P&L</span>
+            <span className={`text-sm font-semibold ${(risk?.daily_pnl_usd ?? 0) >= 0 ? "positive" : "negative"}`}>${(risk?.daily_pnl_usd ?? 0).toFixed(2)}</span>
+          </div>
+          <div className="flex-between" style={{ marginTop: "0.3rem" }}>
+            <span className="text-sm text-secondary">Circuit Breaker</span>
+            <span className={`text-sm font-semibold ${risk?.circuit_breaker_active ? "negative" : "positive"}`}>{risk?.circuit_breaker_active ? "ACTIVE" : "Off"}</span>
           </div>
         </div>
       </div>

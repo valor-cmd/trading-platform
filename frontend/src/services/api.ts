@@ -86,6 +86,13 @@ export const stopBots = () => api.post("/bots/stop");
 
 export const getConfig = () => api.get("/config");
 
+export const updateConfig = (data: {
+  max_daily_loss_usd?: number;
+  max_position_size_usd?: number;
+  default_stop_loss_pct?: number;
+  max_leverage?: number;
+}) => api.post("/config", data);
+
 export const getHealth = () => api.get("/health");
 
 export const getExchangesStatus = () => api.get("/exchanges/status");
