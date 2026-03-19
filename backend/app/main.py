@@ -191,6 +191,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.info(f"Hummingbot API not available: {e}")
 
+    if total_usdt > 0:
+        exchange_id = "paper"
+        _ensure_bot_running("scalper", scalper_bot.start(exchange_id, interval_seconds=30), _bot_tasks)
+        _ensure_bot_running("swing", swing_bot.start(exchange_id, interval_seconds=300), _bot_tasks)
+        _ensure_bot_running("long_term", long_term_bot.start(exchange_id, interval_seconds=3600), _bot_tasks)
+        _ensure_bot_running("arbitrage", arb_bot.start(interval_seconds=30), _bot_tasks)
+        _ensure_bot_running("grid", grid_bot.start(exchange_id, interval_seconds=60), _bot_tasks)
+        _ensure_bot_running("mean_reversion", mean_reversion_bot.start(exchange_id, interval_seconds=120), _bot_tasks)
+        _ensure_bot_running("momentum", momentum_bot.start(exchange_id, interval_seconds=300), _bot_tasks)
+        _ensure_bot_running("dca", dca_bot.start(exchange_id, interval_seconds=180), _bot_tasks)
+        logger.info(f"Auto-started all bots with ${total_usdt:.2f} USDT")
+
     yield
 
     price_refresh_task.cancel()
