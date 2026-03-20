@@ -8,6 +8,7 @@ import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
   getLiveBalance, resetAccount, getOHLCV, getConfig, updateConfig,
+  getAccounts, createAccount, startAccountBots, stopAccountBots,
 } from "../services/api";
 
 interface BotTradeDetail {
@@ -262,8 +263,28 @@ const CustomTooltip = ({ active, payload, label, chartMode }: { active?: boolean
   return null;
 };
 
+interface AccountInfo {
+  name: string;
+  label: string;
+  daily_target_pct: number | null;
+  max_daily_loss_usd: number;
+  auto_stop_on_target: boolean;
+  balance_usd: number;
+  active: boolean;
+  target_hit: boolean;
+}
+
 function Dashboard() {
   const navigate = useNavigate();
+  const [activeAccount, setActiveAccount] = useState("default");
+  const [accounts, setAccountsList] = useState<AccountInfo[]>([]);
+  const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [newAcctName, setNewAcctName] = useState("");
+  const [newAcctLabel, setNewAcctLabel] = useState("");
+  const [newAcctTarget, setNewAcctTarget] = useState("1");
+  const [newAcctLoss, setNewAcctLoss] = useState("50");
+  const [newAcctDeposit, setNewAcctDeposit] = useState("100");
+  const [newAcctAutoStop, setNewAcctAutoStop] = useState(true);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [bots, setBots] = useState<Record<string, { active_trades: number; running?: boolean }>>({});
@@ -293,16 +314,23 @@ function Dashboard() {
   const [riskCfgMsg, setRiskCfgMsg] = useState("");
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
+  const loadAccounts = async () => {
+    try {
+      const r = await getAccounts();
+      setAccountsList(r.data || []);
+    } catch {}
+  };
+
   const load = async () => {
     try {
       const results = await Promise.allSettled([
-        getAccountingSummary(),
+        getAccountingSummary(activeAccount),
         getRiskStatus(),
         getBotStatus(),
-        getPortfolioChart(2000),
+        getPortfolioChart(2000, activeAccount),
         getBotsRunning(),
         getArbStatus(),
-        getLiveBalance(),
+        getLiveBalance(activeAccount),
       ]);
       const val = (i: number) => results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<any>).value : null;
       const s = val(0);
@@ -390,20 +418,24 @@ function Dashboard() {
   };
 
   useEffect(() => {
-    load();
+    loadAccounts();
     getConfig().then((r) => {
       const c = { max_daily_loss_usd: r.data.max_daily_loss_usd, max_position_size_usd: r.data.max_position_size_usd, default_stop_loss_pct: r.data.default_stop_loss_pct, max_leverage: r.data.max_leverage };
       setRiskCfg(c);
       setRiskCfgDraft(c);
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeAccount]);
 
   const handleDeposit = async () => {
     const amt = parseFloat(depositAmount);
     if (!amt || amt <= 0) return;
-    await recordDeposit({ exchange: "paper", amount_usd: amt, asset: "USDT", asset_amount: amt });
+    await recordDeposit({ exchange: "paper", amount_usd: amt, asset: "USDT", asset_amount: amt }, activeAccount);
     setDepositAmount("");
     setShowDeposit(false);
     await load();
@@ -412,7 +444,7 @@ function Dashboard() {
   const handleWithdraw = async () => {
     const amt = parseFloat(withdrawAmount);
     if (!amt || amt <= 0) return;
-    await recordWithdrawal({ exchange: "paper", amount_usd: amt, asset: "USDT", asset_amount: amt });
+    await recordWithdrawal({ exchange: "paper", amount_usd: amt, asset: "USDT", asset_amount: amt }, activeAccount);
     setWithdrawAmount("");
     setShowWithdraw(false);
     await load();
@@ -522,13 +554,110 @@ function Dashboard() {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>Portfolio</h2>
+      <div className="page-header" style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>Portfolio</h2>
+        <select
+          value={activeAccount}
+          onChange={(e) => setActiveAccount(e.target.value)}
+          style={{
+            background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)",
+            borderRadius: 8, padding: "0.4rem 0.8rem", fontSize: "0.85rem", cursor: "pointer",
+          }}
+        >
+          {accounts.map((a) => (
+            <option key={a.name} value={a.name}>
+              {a.label}{a.daily_target_pct ? ` (${a.daily_target_pct}% target)` : ""}{a.target_hit ? " -- TARGET HIT" : ""}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => setShowCreateAccount(true)}
+          style={{
+            background: "var(--accent)", color: "#000", border: "none", borderRadius: 8,
+            padding: "0.4rem 0.8rem", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer",
+          }}
+        >+ New Account</button>
         <span className={`badge ${risk?.paper_trading ? "badge-paper" : "badge-active"}`}>
           <span className="badge-dot" />
           {risk?.paper_trading ? "Paper" : "Live"}
         </span>
+        {activeAccount !== "default" && (
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              onClick={async () => { try { await startAccountBots(activeAccount); await load(); } catch {} }}
+              style={{ background: "var(--green)", color: "#000", border: "none", borderRadius: 6, padding: "0.3rem 0.6rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+            >Start Bots</button>
+            <button
+              onClick={async () => { try { await stopAccountBots(activeAccount); await load(); } catch {} }}
+              style={{ background: "var(--red)", color: "#fff", border: "none", borderRadius: 6, padding: "0.3rem 0.6rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+            >Stop Bots</button>
+          </div>
+        )}
       </div>
+
+      {showCreateAccount && (
+        <div className="card mb-md" style={{ padding: "1.5rem" }}>
+          <h3 style={{ marginTop: 0, marginBottom: "1rem" }}>Create New Account</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Account ID (alphanumeric)</label>
+              <input value={newAcctName} onChange={(e) => setNewAcctName(e.target.value.replace(/[^a-zA-Z0-9]/g, ""))}
+                placeholder="e.g. daily1pct" style={{ width: "100%", background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "0.5rem" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Display Name</label>
+              <input value={newAcctLabel} onChange={(e) => setNewAcctLabel(e.target.value)}
+                placeholder="e.g. 1% Daily Target" style={{ width: "100%", background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "0.5rem" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Daily Target %</label>
+              <input value={newAcctTarget} onChange={(e) => setNewAcctTarget(e.target.value)} type="number" step="0.1"
+                style={{ width: "100%", background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "0.5rem" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Max Daily Loss (USD)</label>
+              <input value={newAcctLoss} onChange={(e) => setNewAcctLoss(e.target.value)} type="number"
+                style={{ width: "100%", background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "0.5rem" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Initial Deposit (USD)</label>
+              <input value={newAcctDeposit} onChange={(e) => setNewAcctDeposit(e.target.value)} type="number"
+                style={{ width: "100%", background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 8, padding: "0.5rem" }} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", paddingTop: "1.2rem" }}>
+              <input type="checkbox" checked={newAcctAutoStop} onChange={(e) => setNewAcctAutoStop(e.target.checked)} id="autoStop" />
+              <label htmlFor="autoStop" style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Auto-stop bots when target hit</label>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+            <button
+              onClick={async () => {
+                try {
+                  await createAccount({
+                    name: newAcctName,
+                    label: newAcctLabel || newAcctName,
+                    daily_target_pct: parseFloat(newAcctTarget) || undefined,
+                    max_daily_loss_usd: parseFloat(newAcctLoss) || 50,
+                    auto_stop_on_target: newAcctAutoStop,
+                    initial_deposit_usd: parseFloat(newAcctDeposit) || 0,
+                  });
+                  setShowCreateAccount(false);
+                  setNewAcctName(""); setNewAcctLabel("");
+                  await loadAccounts();
+                  setActiveAccount(newAcctName);
+                } catch (e: any) {
+                  alert(e?.response?.data?.detail || "Failed to create account");
+                }
+              }}
+              style={{ background: "var(--accent)", color: "#000", border: "none", borderRadius: 8, padding: "0.5rem 1.25rem", fontWeight: 600, cursor: "pointer" }}
+            >Create</button>
+            <button
+              onClick={() => setShowCreateAccount(false)}
+              style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "0.5rem 1.25rem", cursor: "pointer" }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
 
       <div className="card mb-md" style={{ textAlign: "center", padding: "2rem 1.25rem" }}>
         <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)", marginBottom: "0.5rem" }}>

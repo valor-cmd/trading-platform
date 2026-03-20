@@ -394,16 +394,23 @@ async def tokens_by_chain(chain: str):
 
 
 @app.get("/api/portfolio/chart")
-async def portfolio_chart(limit: int = 200):
-    data = trade_store.get_portfolio_chart(limit)
-    now_balance = _fast_live_balance()
+async def portfolio_chart(limit: int = 200, account: str = "default"):
+    from app.core.accounts import account_manager
+    try:
+        acct = account_manager.get(account)
+    except ValueError:
+        acct = account_manager.get("default")
+    _ts = acct.trade_store
+    _pe = acct.paper_exchange
+    data = _ts.get_portfolio_chart(limit)
+    now_balance = _fast_live_balance(_pe, _ts)
     data.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": now_balance,
     })
 
     trades = []
-    for t in trade_store.trades:
+    for t in _ts.trades:
         trade_id = t.get("id", 0)
         ts = t.get("opened_at", "")
         if ts:
@@ -443,13 +450,13 @@ async def portfolio_chart(limit: int = 200):
             })
 
     events = []
-    for d in trade_store.deposits:
+    for d in _ts.deposits:
         events.append({
             "timestamp": d.get("timestamp", ""),
             "type": "deposit",
             "amount_usd": d.get("amount_usd", 0),
         })
-    for w in trade_store.withdrawals:
+    for w in _ts.withdrawals:
         events.append({
             "timestamp": w.get("timestamp", ""),
             "type": "withdrawal",

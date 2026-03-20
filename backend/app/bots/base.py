@@ -90,6 +90,7 @@ class BaseBot(ABC):
         self._cycle_count = 0
         self._last_scan_results: dict[str, str] = {}
         self._symbol_cooldowns: dict[str, float] = {}
+        self._account = None
 
     @abstractmethod
     def get_timeframes(self) -> list[str]:
@@ -170,6 +171,17 @@ class BaseBot(ABC):
 
     async def run_cycle(self, exchange_id: str):
         self._cycle_count += 1
+
+        if self._account and self._account.check_daily_target():
+            if self._cycle_count % 60 == 1:
+                logger.info(f"{self.bot_type.value} daily target hit for account '{self._account.config.name}' -- skipping new trades")
+            for trade in list(self.active_trades):
+                try:
+                    await self.close_trade(exchange_id, trade, "closed")
+                except Exception:
+                    pass
+            return
+
         symbols = await self._get_filtered_symbols()
         if not symbols:
             logger.warning(f"{self.bot_type.value} has no available symbols to scan")

@@ -17,11 +17,20 @@ from app.exchange.simulator import paper_exchange
 from app.exchange.live_prices import live_prices
 from app.risk.engine import RiskEngine
 from app.backtesting.engine import BacktestEngine
+from app.core.accounts import account_manager
 
 
-def _entry_price_map() -> dict[str, float]:
+def _resolve_account(account: str = "default"):
+    try:
+        return account_manager.get(account)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Account '{account}' not found")
+
+
+def _entry_price_map(ts=None) -> dict[str, float]:
+    ts = ts or trade_store
     m: dict[str, float] = {}
-    for t in trade_store.trades:
+    for t in ts.trades:
         sym = t.get("symbol", "")
         ep = t.get("entry_price", 0)
         if sym and ep > 0:
@@ -85,10 +94,12 @@ def _calc_open_position_value_sync(open_trades: list[dict], prices: dict[str, fl
     return value
 
 
-def _fast_live_balance() -> float:
-    usdt = paper_exchange.balances.get("USDT", 0)
-    open_trades = trade_store.get_open_trades()
-    entry_prices = _entry_price_map()
+def _fast_live_balance(pe=None, ts=None) -> float:
+    pe = pe or paper_exchange
+    ts = ts or trade_store
+    usdt = pe.balances.get("USDT", 0)
+    open_trades = ts.get_open_trades()
+    entry_prices = _entry_price_map(ts)
     cached_prices: dict[str, float] = {}
     for cache_key, cached in live_prices._ticker_cache.items():
         if cached and cached.get("last", 0) > 0:
@@ -250,8 +261,9 @@ async def get_analysis(exchange_id: str, symbol: str, timeframe: str = "1h"):
 
 
 @router.post("/accounting/deposit")
-def record_deposit(req: DepositRequest, bg: BackgroundTasks, _auth=Depends(require_auth)):
-    dep = trade_store.add_deposit({
+def record_deposit(req: DepositRequest, bg: BackgroundTasks, account: str = "default", _auth=Depends(require_auth)):
+    acct = _resolve_account(account)
+    dep = acct.trade_store.add_deposit({
         "exchange": req.exchange,
         "amount_usd": req.amount_usd,
         "asset": req.asset,
@@ -259,17 +271,17 @@ def record_deposit(req: DepositRequest, bg: BackgroundTasks, _auth=Depends(requi
         "wallet_address": req.wallet_address,
         "tx_hash": req.tx_hash,
     })
-    paper_exchange.balances["USDT"] = paper_exchange.balances.get("USDT", 0) + req.amount_usd
-    paper_exchange._save()
-    new_total = paper_exchange.balances.get("USDT", 0)
-    bg.add_task(risk_engine.rebalance_buckets, new_total, {})
-    trade_store.snapshots.append({
+    acct.paper_exchange.balances["USDT"] = acct.paper_exchange.balances.get("USDT", 0) + req.amount_usd
+    acct.paper_exchange._save()
+    new_total = acct.paper_exchange.balances.get("USDT", 0)
+    bg.add_task(acct.risk_engine.rebalance_buckets, new_total, {})
+    acct.trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": round(new_total, 5),
-        "open_trades": len(trade_store.get_open_trades()),
-        "total_trades": len(trade_store.trades),
+        "open_trades": len(acct.trade_store.get_open_trades()),
+        "total_trades": len(acct.trade_store.trades),
     })
-    trade_store._save()
+    acct.trade_store._save()
     return {
         "id": dep["id"],
         "amount_usd": req.amount_usd,
@@ -278,8 +290,9 @@ def record_deposit(req: DepositRequest, bg: BackgroundTasks, _auth=Depends(requi
 
 
 @router.post("/accounting/withdrawal")
-def record_withdrawal(req: WithdrawalRequest, bg: BackgroundTasks, _auth=Depends(require_auth)):
-    wd = trade_store.add_withdrawal({
+def record_withdrawal(req: WithdrawalRequest, bg: BackgroundTasks, account: str = "default", _auth=Depends(require_auth)):
+    acct = _resolve_account(account)
+    wd = acct.trade_store.add_withdrawal({
         "exchange": req.exchange,
         "amount_usd": req.amount_usd,
         "asset": req.asset,
@@ -287,17 +300,17 @@ def record_withdrawal(req: WithdrawalRequest, bg: BackgroundTasks, _auth=Depends
         "wallet_address": req.wallet_address,
         "tx_hash": req.tx_hash,
     })
-    paper_exchange.balances["USDT"] = max(0, paper_exchange.balances.get("USDT", 0) - req.amount_usd)
-    paper_exchange._save()
-    new_total = paper_exchange.balances.get("USDT", 0)
-    bg.add_task(risk_engine.rebalance_buckets, new_total, {})
-    trade_store.snapshots.append({
+    acct.paper_exchange.balances["USDT"] = max(0, acct.paper_exchange.balances.get("USDT", 0) - req.amount_usd)
+    acct.paper_exchange._save()
+    new_total = acct.paper_exchange.balances.get("USDT", 0)
+    bg.add_task(acct.risk_engine.rebalance_buckets, new_total, {})
+    acct.trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": round(new_total, 5),
-        "open_trades": len(trade_store.get_open_trades()),
-        "total_trades": len(trade_store.trades),
+        "open_trades": len(acct.trade_store.get_open_trades()),
+        "total_trades": len(acct.trade_store.trades),
     })
-    trade_store._save()
+    acct.trade_store._save()
     return {
         "id": wd["id"],
         "amount_usd": req.amount_usd,
@@ -306,27 +319,28 @@ def record_withdrawal(req: WithdrawalRequest, bg: BackgroundTasks, _auth=Depends
 
 
 @router.post("/accounting/reset")
-def reset_account(bg: BackgroundTasks, _auth=Depends(require_auth)):
-    paper_exchange.balances = {"USDT": 0.0}
-    paper_exchange._save()
-    trade_store.trades.clear()
-    trade_store.deposits.clear()
-    trade_store.withdrawals.clear()
-    trade_store.snapshots.clear()
-    trade_store._running_balance = 0.0
-    trade_store._next_id = 1
-    trade_store.snapshots.append({
+def reset_account(bg: BackgroundTasks, account: str = "default", _auth=Depends(require_auth)):
+    acct = _resolve_account(account)
+    acct.paper_exchange.balances = {"USDT": 0.0}
+    acct.paper_exchange._save()
+    acct.trade_store.trades.clear()
+    acct.trade_store.deposits.clear()
+    acct.trade_store.withdrawals.clear()
+    acct.trade_store.snapshots.clear()
+    acct.trade_store._running_balance = 0.0
+    acct.trade_store._next_id = 1
+    acct.trade_store.snapshots.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "balance": 0.0,
         "open_trades": 0,
         "total_trades": 0,
     })
-    trade_store._save()
+    acct.trade_store._save()
 
     async def _reset_buckets():
         from app.risk.engine import BucketAllocation
         allocation = BucketAllocation(total_capital_usd=0.0)
-        await risk_engine.save_bucket_allocation(allocation)
+        await acct.risk_engine.save_bucket_allocation(allocation)
         await store.set("daily_pnl", "0")
 
     bg.add_task(_reset_buckets)
@@ -334,10 +348,11 @@ def reset_account(bg: BackgroundTasks, _auth=Depends(require_auth)):
 
 
 @router.get("/accounting/summary")
-def get_accounting_summary():
-    data = trade_store.full_accounting()
-    live_total = _fast_live_balance()
-    usdt = paper_exchange.balances.get("USDT", 0)
+def get_accounting_summary(account: str = "default"):
+    acct = _resolve_account(account)
+    data = acct.trade_store.full_accounting()
+    live_total = _fast_live_balance(acct.paper_exchange, acct.trade_store)
+    usdt = acct.paper_exchange.balances.get("USDT", 0)
     open_pos_value = live_total - usdt
     deps = data["summary"]["total_deposits_usd"]
     wds = data["summary"]["total_withdrawals_usd"]
@@ -347,42 +362,51 @@ def get_accounting_summary():
     data["summary"]["net_pnl_usd"] = round(live_pnl, 5)
     data["summary"]["cash_balance_usd"] = round(usdt, 5)
     data["summary"]["open_position_value_usd"] = round(max(open_pos_value, 0), 5)
+    data["summary"]["daily_target_pct"] = acct.config.daily_target_pct
+    data["summary"]["target_hit"] = acct._target_hit
+    data["summary"]["auto_stop_on_target"] = acct.config.auto_stop_on_target
     return data
 
 
 @router.get("/accounting/pnl")
-def get_pnl(days: int = 30):
-    return trade_store.pnl_by_date(days)
+def get_pnl(days: int = 30, account: str = "default"):
+    acct = _resolve_account(account)
+    return acct.trade_store.pnl_by_date(days)
 
 
 @router.get("/accounting/win-rate")
-def get_win_rate():
-    return trade_store.win_rate()
+def get_win_rate(account: str = "default"):
+    acct = _resolve_account(account)
+    return acct.trade_store.win_rate()
 
 
 @router.get("/accounting/by-bot")
-def get_pnl_by_bot():
-    return trade_store.pnl_by_bot()
+def get_pnl_by_bot(account: str = "default"):
+    acct = _resolve_account(account)
+    return acct.trade_store.pnl_by_bot()
 
 
 @router.get("/accounting/trades")
-def get_trades(status: str = "all"):
+def get_trades(status: str = "all", account: str = "default"):
+    acct = _resolve_account(account)
     if status == "open":
-        return trade_store.get_open_trades()
+        return acct.trade_store.get_open_trades()
     elif status == "closed":
-        return trade_store.get_closed_trades()
-    return trade_store.trades
+        return acct.trade_store.get_closed_trades()
+    return acct.trade_store.trades
 
 
 @router.get("/accounting/trades/with-balance")
-def get_trades_with_balance():
-    return trade_store.trades_with_running_balance()
+def get_trades_with_balance(account: str = "default"):
+    acct = _resolve_account(account)
+    return acct.trade_store.trades_with_running_balance()
 
 
 @router.get("/accounting/active-trades-live")
-def get_active_trades_live():
-    open_trades = trade_store.get_open_trades()
-    entry_prices = _entry_price_map()
+def get_active_trades_live(account: str = "default"):
+    acct = _resolve_account(account)
+    open_trades = acct.trade_store.get_open_trades()
+    entry_prices = _entry_price_map(acct.trade_store)
     cached_prices: dict[str, float] = {}
     for cache_key, cached in live_prices._ticker_cache.items():
         if cached and cached.get("last", 0) > 0:
@@ -417,26 +441,28 @@ def get_active_trades_live():
 
 
 @router.get("/accounting/fees")
-def get_total_fees():
+def get_total_fees(account: str = "default"):
+    acct = _resolve_account(account)
     return {
-        "total_fees_usd": trade_store.total_fees(),
+        "total_fees_usd": acct.trade_store.total_fees(),
         "fee_breakdown": {
-            "entry_fees": round(sum(t.get("entry_fee_usd", 0) for t in trade_store.trades), 4),
-            "exit_fees": round(sum(t.get("exit_fee_usd", 0) for t in trade_store.trades), 4),
+            "entry_fees": round(sum(t.get("entry_fee_usd", 0) for t in acct.trade_store.trades), 4),
+            "exit_fees": round(sum(t.get("exit_fee_usd", 0) for t in acct.trade_store.trades), 4),
         },
     }
 
 
 @router.get("/accounting/live-balance")
-def get_live_balance():
-    usdt = paper_exchange.balances.get("USDT", 0)
-    live_total = _fast_live_balance()
+def get_live_balance(account: str = "default"):
+    acct = _resolve_account(account)
+    usdt = acct.paper_exchange.balances.get("USDT", 0)
+    live_total = _fast_live_balance(acct.paper_exchange, acct.trade_store)
     open_pos = live_total - usdt
     return {
         "cash_balance_usd": round(usdt, 5),
         "open_position_value_usd": round(max(open_pos, 0), 5),
         "total_live_balance_usd": round(live_total, 5),
-        "open_trade_count": len(trade_store.get_open_trades()),
+        "open_trade_count": len(acct.trade_store.get_open_trades()),
     }
 
 
@@ -518,8 +544,9 @@ async def get_bot_status():
 
 
 @router.get("/accounting/ledger")
-def get_ledger():
-    return trade_store.get_ledger()
+def get_ledger(account: str = "default"):
+    acct = _resolve_account(account)
+    return acct.trade_store.get_ledger()
 
 
 class UpdateConfigRequest(BaseModel):
@@ -560,3 +587,138 @@ async def update_config(req: UpdateConfigRequest, _auth=Depends(require_auth)):
         "max_leverage": settings.max_leverage,
         "paper_trading": settings.paper_trading,
     }
+
+
+class CreateAccountRequest(BaseModel):
+    name: str
+    label: str = ""
+    daily_target_pct: Optional[float] = None
+    max_daily_loss_usd: float = 50.0
+    auto_stop_on_target: bool = False
+    initial_deposit_usd: float = 0.0
+
+
+class UpdateAccountRequest(BaseModel):
+    label: Optional[str] = None
+    daily_target_pct: Optional[float] = None
+    max_daily_loss_usd: Optional[float] = None
+    auto_stop_on_target: Optional[bool] = None
+
+
+@router.get("/accounts")
+def list_accounts():
+    return account_manager.list_accounts()
+
+
+@router.post("/accounts")
+def create_account(req: CreateAccountRequest, _auth=Depends(require_auth)):
+    try:
+        config = account_manager.create(
+            name=req.name,
+            label=req.label,
+            daily_target_pct=req.daily_target_pct,
+            max_daily_loss_usd=req.max_daily_loss_usd,
+            auto_stop_on_target=req.auto_stop_on_target,
+        )
+        if req.initial_deposit_usd > 0:
+            acct = account_manager.get(req.name)
+            acct.trade_store.add_deposit({
+                "exchange": "paper",
+                "amount_usd": req.initial_deposit_usd,
+                "asset": "USDT",
+                "asset_amount": req.initial_deposit_usd,
+            })
+            acct.paper_exchange.balances["USDT"] = req.initial_deposit_usd
+            acct.paper_exchange._save()
+            acct.paper_exchange.connect("paper")
+        return config.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/accounts/{name}")
+def update_account_config(name: str, req: UpdateAccountRequest, _auth=Depends(require_auth)):
+    try:
+        config = account_manager.update(
+            name,
+            label=req.label,
+            daily_target_pct=req.daily_target_pct,
+            max_daily_loss_usd=req.max_daily_loss_usd,
+            auto_stop_on_target=req.auto_stop_on_target,
+        )
+        return config.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/accounts/{name}")
+def delete_account(name: str, _auth=Depends(require_auth)):
+    try:
+        account_manager.delete(name)
+        return {"status": "deleted", "name": name}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/accounts/{name}/start-bots")
+async def start_account_bots(name: str, _auth=Depends(require_auth)):
+    acct = _resolve_account(name)
+    if not acct.paper_exchange.is_connected("paper"):
+        acct.paper_exchange.connect("paper")
+
+    balance = await acct.paper_exchange.fetch_balance("paper")
+    total = balance.get("total", {}).get("USDT", 0) or 0
+    if total > 0:
+        await acct.risk_engine.rebalance_buckets(total, {})
+    else:
+        raise HTTPException(status_code=400, detail="No USDT balance -- deposit funds first")
+
+    from app.bots.scalper import ScalperBot
+    from app.bots.swing import SwingBot
+    from app.bots.long_term import LongTermBot
+    from app.bots.grid import GridBot
+    from app.bots.mean_reversion import MeanReversionBot
+    from app.bots.momentum import MomentumBot
+    from app.bots.dca import DCABot
+    from app.indicators.sentiment import SentimentAnalyzer
+
+    sentiment = SentimentAnalyzer()
+    pe = acct.paper_exchange
+    re = acct.risk_engine
+
+    bots_map = {
+        "scalper": (ScalperBot(pe, re, sentiment), 30),
+        "swing": (SwingBot(pe, re, sentiment), 300),
+        "long_term": (LongTermBot(pe, re, sentiment), 3600),
+        "grid": (GridBot(pe, re, sentiment), 60),
+        "mean_reversion": (MeanReversionBot(pe, re, sentiment), 120),
+        "momentum": (MomentumBot(pe, re, sentiment), 300),
+        "dca": (DCABot(pe, re, sentiment), 180),
+    }
+
+    acct.bots = {k: v[0] for k, v in bots_map.items()}
+
+    if acct.config.auto_stop_on_target and acct.config.daily_target_pct:
+        for bot in acct.bots.values():
+            bot._account = acct
+
+    import asyncio
+    for bot_name, (bot, interval) in bots_map.items():
+        if bot_name not in acct.bot_tasks or acct.bot_tasks[bot_name].done():
+            acct.bot_tasks[bot_name] = asyncio.create_task(
+                bot.start("paper", interval_seconds=interval),
+                name=f"bot_{name}_{bot_name}",
+            )
+
+    return {"status": "started", "account": name, "bots": list(bots_map.keys())}
+
+
+@router.post("/accounts/{name}/stop-bots")
+async def stop_account_bots(name: str, _auth=Depends(require_auth)):
+    acct = _resolve_account(name)
+    for bot in acct.bots.values():
+        bot.stop()
+    for task in acct.bot_tasks.values():
+        task.cancel()
+    acct.bot_tasks.clear()
+    return {"status": "stopped", "account": name}

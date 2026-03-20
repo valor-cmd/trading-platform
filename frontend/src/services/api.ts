@@ -28,39 +28,39 @@ export const getAnalysis = (exchangeId: string, symbol: string, timeframe = "1h"
 export const getOHLCV = (exchangeId: string, symbol: string, timeframe = "1h", limit = 100) =>
   api.get(`/market/${exchangeId}/${symbol}/ohlcv`, { params: { timeframe, limit } });
 
-export const getAccountingSummary = () => api.get("/accounting/summary");
+export const getAccountingSummary = (account = "default") => api.get("/accounting/summary", { params: { account } });
 
-export const getPnl = (days = 30) => api.get("/accounting/pnl", { params: { days } });
+export const getPnl = (days = 30, account = "default") => api.get("/accounting/pnl", { params: { days, account } });
 
-export const getWinRate = () => api.get("/accounting/win-rate");
+export const getWinRate = (account = "default") => api.get("/accounting/win-rate", { params: { account } });
 
-export const getPnlByBot = () => api.get("/accounting/by-bot");
+export const getPnlByBot = (account = "default") => api.get("/accounting/by-bot", { params: { account } });
 
-export const getTrades = (status = "all") => api.get("/accounting/trades", { params: { status } });
+export const getTrades = (status = "all", account = "default") => api.get("/accounting/trades", { params: { status, account } });
 
-export const getTradesWithBalance = () => api.get("/accounting/trades/with-balance");
+export const getTradesWithBalance = (account = "default") => api.get("/accounting/trades/with-balance", { params: { account } });
 
-export const getActiveTradesLive = () => api.get("/accounting/active-trades-live");
+export const getActiveTradesLive = (account = "default") => api.get("/accounting/active-trades-live", { params: { account } });
 
-export const getFees = () => api.get("/accounting/fees");
+export const getFees = (account = "default") => api.get("/accounting/fees", { params: { account } });
 
-export const getLiveBalance = () => api.get("/accounting/live-balance");
+export const getLiveBalance = (account = "default") => api.get("/accounting/live-balance", { params: { account } });
 
 export const recordDeposit = (data: {
   exchange: string;
   amount_usd: number;
   asset: string;
   asset_amount: number;
-}) => api.post("/accounting/deposit", data);
+}, account = "default") => api.post("/accounting/deposit", data, { params: { account } });
 
 export const recordWithdrawal = (data: {
   exchange: string;
   amount_usd: number;
   asset: string;
   asset_amount: number;
-}) => api.post("/accounting/withdrawal", data);
+}, account = "default") => api.post("/accounting/withdrawal", data, { params: { account } });
 
-export const resetAccount = () => api.post("/accounting/reset");
+export const resetAccount = (account = "default") => api.post("/accounting/reset", null, { params: { account } });
 
 export const rebalanceBuckets = (totalCapital?: number) =>
   api.post("/risk/rebalance", { total_capital: totalCapital ?? null });
@@ -114,9 +114,9 @@ export const searchTokens = (q = "") => api.get("/tokens/search", { params: { q 
 
 export const getTokensByChain = (chain: string) => api.get(`/tokens/by-chain/${chain}`);
 
-export const getPortfolioChart = (limit = 200) => api.get("/portfolio/chart", { params: { limit } });
+export const getPortfolioChart = (limit = 200, account = "default") => api.get("/portfolio/chart", { params: { limit, account } });
 
-export const getLedger = () => api.get("/accounting/ledger");
+export const getLedger = (account = "default") => api.get("/accounting/ledger", { params: { account } });
 
 export const hbotConnect = (data?: { hbot_url?: string; username?: string; password?: string }) =>
   api.post("/hummingbot/connect", data || {});
@@ -215,5 +215,29 @@ export const hbotSwapExecute = (data: {
 }) => api.post("/hummingbot/gateway/swap/execute", data);
 
 export const hbotGetStrategyTypes = () => api.get("/hummingbot/strategy/types");
+
+export const getAccounts = () => api.get("/accounts");
+
+export const createAccount = (data: {
+  name: string;
+  label?: string;
+  daily_target_pct?: number;
+  max_daily_loss_usd?: number;
+  auto_stop_on_target?: boolean;
+  initial_deposit_usd?: number;
+}) => api.post("/accounts", data);
+
+export const updateAccountConfig = (name: string, data: {
+  label?: string;
+  daily_target_pct?: number;
+  max_daily_loss_usd?: number;
+  auto_stop_on_target?: boolean;
+}) => api.put(`/accounts/${name}`, data);
+
+export const deleteAccount = (name: string) => api.delete(`/accounts/${name}`);
+
+export const startAccountBots = (name: string) => api.post(`/accounts/${name}/start-bots`);
+
+export const stopAccountBots = (name: string) => api.post(`/accounts/${name}/stop-bots`);
 
 export default api;
