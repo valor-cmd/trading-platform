@@ -91,6 +91,8 @@ class BaseBot(ABC):
         self._last_scan_results: dict[str, str] = {}
         self._symbol_cooldowns: dict[str, float] = {}
         self._account = None
+        self._trade_store = None
+        self._kv_store = None
 
     @abstractmethod
     def get_timeframes(self) -> list[str]:
@@ -128,8 +130,20 @@ class BaseBot(ABC):
     def _record_cooldown(self, symbol: str):
         self._symbol_cooldowns[symbol] = time.time()
 
+    def _get_trade_store(self):
+        if self._trade_store:
+            return self._trade_store
+        if self._account:
+            return self._account.trade_store
+        return trade_store
+
+    def _get_kv_store(self):
+        if self._kv_store:
+            return self._kv_store
+        return store
+
     def _get_global_open_count(self) -> int:
-        return len(trade_store.get_open_trades())
+        return len(self._get_trade_store().get_open_trades())
 
     @abstractmethod
     async def evaluate_entry(self, symbol: str, signal: SignalResult, sentiment: dict) -> bool:
@@ -379,7 +393,10 @@ class BaseBot(ABC):
         }
         self.active_trades.append(trade)
 
-        trade_store.add_trade({
+        ts = self._get_trade_store()
+        kv = self._get_kv_store()
+
+        ts.add_trade({
             "bot_type": self.bot_type.value,
             "exchange": exchange_id,
             "symbol": symbol,
@@ -401,13 +418,13 @@ class BaseBot(ABC):
             "signal_score": signal_score,
         })
 
-        await store.hset(
+        await kv.hset(
             f"active_trades:{self.bot_type.value}",
             order["id"],
             json.dumps(trade, default=str),
         )
 
-        trade_store.record_snapshot()
+        ts.record_snapshot()
 
     async def close_trade(self, exchange_id: str, trade: dict, status: str = "closed"):
         close_side = "sell" if trade["side"] == "buy" else "buy"
@@ -432,10 +449,13 @@ class BaseBot(ABC):
         await self.risk.update_daily_pnl(net_pnl)
         await self.risk.release_bucket(self.bot_type.value, trade["position_usd"])
 
-        open_trades = trade_store.get_open_trades()
+        ts = self._get_trade_store()
+        kv = self._get_kv_store()
+
+        open_trades = ts.get_open_trades()
         for ot in open_trades:
             if ot.get("symbol") == trade["symbol"] and ot.get("bot_type") == self.bot_type.value:
-                trade_store.close_trade(
+                ts.close_trade(
                     ot["id"], exit_price, round(net_pnl, 5),
                     round(exit_fee, 5), status,
                     exit_slippage_usd=round(exit_slippage, 8),
@@ -444,9 +464,9 @@ class BaseBot(ABC):
 
         if trade in self.active_trades:
             self.active_trades.remove(trade)
-        await store.hdel(f"active_trades:{self.bot_type.value}", trade["order_id"])
+        await kv.hdel(f"active_trades:{self.bot_type.value}", trade["order_id"])
 
-        trade_store.record_snapshot()
+        ts.record_snapshot()
 
         logger.info(
             f"{self.bot_type.value} CLOSED {trade['symbol']} @ ${exit_price:.8g} "

@@ -698,9 +698,10 @@ async def start_account_bots(name: str, _auth=Depends(require_auth)):
 
     acct.bots = {k: v[0] for k, v in bots_map.items()}
 
-    if acct.config.auto_stop_on_target and acct.config.daily_target_pct:
-        for bot in acct.bots.values():
-            bot._account = acct
+    for bot in acct.bots.values():
+        bot._account = acct
+        bot._trade_store = acct.trade_store
+        bot._kv_store = acct.risk_engine._store
 
     import asyncio
     for bot_name, (bot, interval) in bots_map.items():

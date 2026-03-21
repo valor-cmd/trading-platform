@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.core.store import TradeStore
+from app.core.store import TradeStore, InMemoryStore
 from app.exchange.simulator import PaperExchangeManager
 from app.risk.engine import RiskEngine
 
@@ -137,7 +137,8 @@ class AccountManager:
         os.makedirs(acct_dir, exist_ok=True)
         ts = TradeStore(persist_path=os.path.join(acct_dir, "trade_store.json"))
         pe = PaperExchangeManager(persist_path=os.path.join(acct_dir, "paper_exchange.json"))
-        re = RiskEngine()
+        acct_store = InMemoryStore()
+        re = RiskEngine(own_store=acct_store, trade_store_ref=ts)
         re.set_paper_exchange(pe)
         re.max_daily_loss = config.max_daily_loss_usd
         return Account(config, ts, pe, re)

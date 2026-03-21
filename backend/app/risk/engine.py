@@ -4,7 +4,7 @@ import json
 import logging
 
 from app.core.config import settings
-from app.core.store import store
+from app.core.store import store, InMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,13 @@ class BucketAllocation:
 
 
 class RiskEngine:
-    def __init__(self):
+    def __init__(self, own_store=None, trade_store_ref=None):
         self.max_daily_loss = settings.max_daily_loss_usd
         self.default_sl_pct = settings.default_stop_loss_pct
         self.max_leverage = settings.max_leverage
         self._paper_exchange = None
+        self._store = own_store or store
+        self._trade_store_ref = trade_store_ref
 
     def set_paper_exchange(self, exchange):
         self._paper_exchange = exchange
@@ -58,21 +60,21 @@ class RiskEngine:
         return 0.0
 
     async def get_daily_pnl(self) -> float:
-        raw = await store.get("daily_pnl")
+        raw = await self._store.get("daily_pnl")
         return float(raw) if raw else 0.0
 
     async def update_daily_pnl(self, pnl: float):
         current = await self.get_daily_pnl()
-        await store.set("daily_pnl", str(current + pnl))
+        await self._store.set("daily_pnl", str(current + pnl))
 
     async def get_bucket_allocation(self) -> BucketAllocation:
-        raw = await store.get("bucket_allocation")
+        raw = await self._store.get("bucket_allocation")
         if raw:
             return BucketAllocation(**json.loads(raw))
         return BucketAllocation()
 
     async def save_bucket_allocation(self, allocation: BucketAllocation):
-        await store.set("bucket_allocation", json.dumps(allocation.__dict__))
+        await self._store.set("bucket_allocation", json.dumps(allocation.__dict__))
 
     async def check_circuit_breaker(self) -> bool:
         daily_pnl = await self.get_daily_pnl()
@@ -238,8 +240,11 @@ class RiskEngine:
         allocation = await self.get_bucket_allocation()
         allocation.total_capital_usd = total_capital
 
-        from app.core.store import trade_store
-        pnl_by_bot = trade_store.pnl_by_bot()
+        if self._trade_store_ref:
+            ts = self._trade_store_ref
+        else:
+            from app.core.store import trade_store as ts
+        pnl_by_bot = ts.pnl_by_bot()
         bot_types = ["scalper", "swing", "long_term", "arbitrage", "grid", "mean_reversion", "momentum", "dca"]
         MIN_PCT = 5.0
         TOTAL_PCT = 100.0
@@ -252,7 +257,7 @@ class RiskEngine:
             trades = data.get("trades", 0)
             if trades > 0:
                 win_count = sum(
-                    1 for t in trade_store.get_closed_trades()
+                    1 for t in ts.get_closed_trades()
                     if t.get("bot_type") == bt and t.get("pnl_usd", 0) > 0
                 )
                 wr = win_count / trades
