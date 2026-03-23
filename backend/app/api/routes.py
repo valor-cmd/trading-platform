@@ -440,6 +440,71 @@ def get_active_trades_live(account: str = "default"):
     return result
 
 
+@router.post("/accounting/trades/{trade_ref}/close")
+async def close_trade_manually(trade_ref: str, account: str = "default", _auth=Depends(require_auth)):
+    acct = _resolve_account(account)
+    ts = acct.trade_store
+    pe = acct.paper_exchange
+
+    trade = None
+    for t in ts.get_open_trades():
+        if str(t.get("id")) == trade_ref or t.get("order_id", "") == trade_ref:
+            trade = t
+            break
+    if not trade:
+        raise HTTPException(status_code=404, detail="Open trade not found")
+    trade_id = trade["id"]
+
+    symbol = trade["symbol"]
+    entry_price = trade.get("entry_price", 0)
+    quantity = trade.get("quantity", 0)
+    side = trade.get("side", "buy")
+
+    try:
+        close_side = "sell" if side == "buy" else "buy"
+        order = await pe.create_order("paper", symbol, close_side, quantity)
+        exit_price = order["price"]
+        exit_fee = order.get("fee", 0)
+        exit_slippage = order.get("slippage_usd", 0)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to close: {str(e)}")
+
+    if side == "buy":
+        gross_pnl = (exit_price - entry_price) * quantity
+    else:
+        gross_pnl = (entry_price - exit_price) * quantity
+
+    entry_fee = trade.get("entry_fee_usd", 0)
+    net_pnl = round(gross_pnl - entry_fee - exit_fee, 5)
+
+    ts.close_trade(trade_id, exit_price, net_pnl, round(exit_fee, 5), "closed", exit_slippage_usd=round(exit_slippage, 8))
+    ts.record_snapshot()
+
+    _all_bots = _get_all_bots(account)
+    for bot in _all_bots:
+        bot.active_trades = [t for t in bot.active_trades if t.get("symbol") != symbol or t.get("order_id") != trade.get("order_id", "")]
+
+    return {
+        "status": "closed",
+        "trade_id": trade_id,
+        "symbol": symbol,
+        "exit_price": exit_price,
+        "pnl_usd": net_pnl,
+        "exit_fee": round(exit_fee, 5),
+    }
+
+
+def _get_all_bots(account: str = "default"):
+    if account == "default":
+        from app.main import scalper_bot, swing_bot, long_term_bot, grid_bot, mean_reversion_bot, momentum_bot, dca_bot
+        return [scalper_bot, swing_bot, long_term_bot, grid_bot, mean_reversion_bot, momentum_bot, dca_bot]
+    try:
+        acct = account_manager.get(account)
+        return list(acct.bots.values())
+    except Exception:
+        return []
+
+
 @router.get("/accounting/fees")
 def get_total_fees(account: str = "default"):
     acct = _resolve_account(account)

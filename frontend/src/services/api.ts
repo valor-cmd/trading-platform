@@ -118,6 +118,9 @@ export const getPortfolioChart = (limit = 200, account = "default") => api.get("
 
 export const getLedger = (account = "default") => api.get("/accounting/ledger", { params: { account } });
 
+export const closeTrade = (tradeRef: string | number, account = "default") =>
+  api.post(`/accounting/trades/${tradeRef}/close`, null, { params: { account } });
+
 export const hbotConnect = (data?: { hbot_url?: string; username?: string; password?: string }) =>
   api.post("/hummingbot/connect", data || {});
 

@@ -9,6 +9,7 @@ import {
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
   getLiveBalance, resetAccount, getOHLCV, getConfig, updateConfig,
   getAccounts, createAccount, startAccountBots, stopAccountBots,
+  closeTrade,
 } from "../services/api";
 
 interface BotTradeDetail {
@@ -304,6 +305,7 @@ function Dashboard() {
   const [selectedBotTrade, setSelectedBotTrade] = useState<BotTradeDetail | null>(null);
   const [tradeOHLCV, setTradeOHLCV] = useState<OHLCVBar[]>([]);
   const [tradeChartLoading, setTradeChartLoading] = useState(false);
+  const [closingTrade, setClosingTrade] = useState(false);
   const [tradeEventsMap, setTradeEventsMap] = useState<Record<string, TradeEvent>>({});
   const [zoomLeft, setZoomLeft] = useState<string | null>(null);
   const [zoomRight, setZoomRight] = useState<string | null>(null);
@@ -554,19 +556,26 @@ function Dashboard() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+      <div className="page-header" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>Portfolio</h2>
+        <span className={`badge ${risk?.paper_trading ? "badge-paper" : "badge-active"}`}>
+          <span className="badge-dot" />
+          {risk?.paper_trading ? "Paper" : "Live"}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1rem" }}>
         <select
           value={activeAccount}
           onChange={(e) => setActiveAccount(e.target.value)}
           style={{
             background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)",
-            borderRadius: 8, padding: "0.4rem 0.8rem", fontSize: "0.85rem", cursor: "pointer",
+            borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.85rem", cursor: "pointer",
+            flex: "1 1 auto", minWidth: 0, maxWidth: "100%",
           }}
         >
           {accounts.map((a) => (
             <option key={a.name} value={a.name}>
-              {a.label}{a.daily_target_pct ? ` (${a.daily_target_pct}% target)` : ""}{a.target_hit ? " -- TARGET HIT" : ""}
+              {a.label}{a.daily_target_pct ? ` (${a.daily_target_pct}%)` : ""}{a.target_hit ? " HIT" : ""}
             </option>
           ))}
         </select>
@@ -574,24 +583,21 @@ function Dashboard() {
           onClick={() => setShowCreateAccount(true)}
           style={{
             background: "var(--accent)", color: "#000", border: "none", borderRadius: 8,
-            padding: "0.4rem 0.8rem", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer",
+            padding: "0.5rem 0.75rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer",
+            whiteSpace: "nowrap", flexShrink: 0,
           }}
-        >+ New Account</button>
-        <span className={`badge ${risk?.paper_trading ? "badge-paper" : "badge-active"}`}>
-          <span className="badge-dot" />
-          {risk?.paper_trading ? "Paper" : "Live"}
-        </span>
+        >+ New</button>
         {activeAccount !== "default" && (
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <>
             <button
               onClick={async () => { try { await startAccountBots(activeAccount); await load(); } catch {} }}
-              style={{ background: "var(--green)", color: "#000", border: "none", borderRadius: 6, padding: "0.3rem 0.6rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
-            >Start Bots</button>
+              style={{ background: "var(--green)", color: "#000", border: "none", borderRadius: 6, padding: "0.5rem 0.6rem", fontSize: "0.7rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+            >Start</button>
             <button
               onClick={async () => { try { await stopAccountBots(activeAccount); await load(); } catch {} }}
-              style={{ background: "var(--red)", color: "#fff", border: "none", borderRadius: 6, padding: "0.3rem 0.6rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
-            >Stop Bots</button>
-          </div>
+              style={{ background: "var(--red)", color: "#fff", border: "none", borderRadius: 6, padding: "0.5rem 0.6rem", fontSize: "0.7rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+            >Stop</button>
+          </>
         )}
       </div>
 
@@ -1334,6 +1340,34 @@ function Dashboard() {
             {selectedBotTrade.reasoning && (
               <div style={{ marginTop: "0.5rem", fontSize: "0.7rem", color: "#666", fontStyle: "italic" }}>{selectedBotTrade.reasoning}</div>
             )}
+
+            <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
+              <button
+                disabled={closingTrade}
+                onClick={async () => {
+                  if (!window.confirm(`Close ${selectedBotTrade.symbol} position at market price?`)) return;
+                  setClosingTrade(true);
+                  try {
+                    const res = await closeTrade(selectedBotTrade.order_id, activeAccount);
+                    const pnl = res.data?.pnl_usd ?? 0;
+                    alert(`Closed ${selectedBotTrade.symbol}: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(5)}`);
+                    setSelectedBotTrade(null);
+                    setActiveBotTrades([]);
+                    setTradeOHLCV([]);
+                    await load();
+                  } catch (e: any) {
+                    alert(e?.response?.data?.detail || "Failed to close trade");
+                  }
+                  setClosingTrade(false);
+                }}
+                style={{
+                  flex: 1, padding: "0.6rem", border: "none", borderRadius: 8,
+                  background: "var(--red)", color: "#fff", fontWeight: 600,
+                  fontSize: "0.85rem", cursor: closingTrade ? "wait" : "pointer",
+                  opacity: closingTrade ? 0.6 : 1,
+                }}
+              >{closingTrade ? "Closing..." : "Close at Market"}</button>
+            </div>
           </div>
         </div>
       )}
