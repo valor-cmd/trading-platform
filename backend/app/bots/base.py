@@ -196,6 +196,31 @@ class BaseBot(ABC):
                     pass
             return
 
+        if self._cycle_count % 10 == 1:
+            try:
+                ts = self._get_trade_store()
+                pe = self.exchange
+                usdt = pe.balances.get("USDT", 0)
+                open_trades = ts.get_open_trades()
+                open_by_bot: dict[str, float] = {}
+                for ot in open_trades:
+                    bt = ot.get("bot_type", "")
+                    open_by_bot[bt] = open_by_bot.get(bt, 0) + (ot.get("entry_price", 0) * ot.get("quantity", 0))
+                from app.exchange.live_prices import live_prices as _lp
+                for ot in open_trades:
+                    sym = ot.get("symbol", "")
+                    qty = ot.get("quantity", 0)
+                    bt = ot.get("bot_type", "")
+                    for ck, cv in _lp._ticker_cache.items():
+                        if cv and sym in ck and cv.get("last", 0) > 0:
+                            open_by_bot[bt] = open_by_bot.get(bt, 0) - (ot.get("entry_price", 0) * qty) + (cv["last"] * qty)
+                            break
+                total_cap = usdt + sum(open_by_bot.values())
+                if total_cap > 1:
+                    await self.risk.rebalance_buckets(total_cap, open_by_bot)
+            except Exception as e:
+                logger.debug(f"{self.bot_type.value} periodic rebalance failed: {e}")
+
         symbols = await self._get_filtered_symbols()
         if not symbols:
             logger.warning(f"{self.bot_type.value} has no available symbols to scan")

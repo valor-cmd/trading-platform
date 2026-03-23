@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import {
   getBotStatus, getBotsRunning, startBots, stopBots,
   getArbOpportunities, getArbStatus, getExchangesStatus,
-  getExchangePairs,
+  getExchangePairs, startAccountBots, stopAccountBots,
 } from "../services/api";
 
 interface BotTrade {
@@ -190,7 +190,15 @@ function ExchangeDropdown({ eid, label, pairCount, icon }: { eid: string; label:
   );
 }
 
-function Bots() {
+interface AccountInfo { name: string; label: string; daily_target_pct: number | null; target_hit: boolean; }
+
+interface BotsProps {
+  activeAccount: string;
+  setActiveAccount: (name: string) => void;
+  accounts: AccountInfo[];
+}
+
+function Bots({ activeAccount, setActiveAccount, accounts }: BotsProps) {
   const [bots, setBots] = useState<Record<string, BotData>>({});
   const [botRunning, setBotRunning] = useState<Record<string, { running: boolean; active_trades: number }>>({});
   const [arbStatus, setArbStatus] = useState<ArbStatusData | null>(null);
@@ -205,8 +213,8 @@ function Bots() {
   const load = async () => {
     try {
       const [botRes, runRes, arbStatRes, arbOppRes, exRes] = await Promise.all([
-        getBotStatus(),
-        getBotsRunning(),
+        getBotStatus(activeAccount),
+        getBotsRunning(activeAccount),
         getArbStatus(),
         getArbOpportunities(0, 20),
         getExchangesStatus(),
@@ -233,11 +241,15 @@ function Bots() {
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeAccount]);
 
   const handleStart = async () => {
     try {
-      await startBots("paper");
+      if (activeAccount !== "default") {
+        await startAccountBots(activeAccount);
+      } else {
+        await startBots("paper");
+      }
       setRunning(true);
       setTimeout(load, 2000);
     } catch (e: unknown) {
@@ -247,7 +259,11 @@ function Bots() {
   };
 
   const handleStop = async () => {
-    await stopBots();
+    if (activeAccount !== "default") {
+      await stopAccountBots(activeAccount);
+    } else {
+      await stopBots();
+    }
     setRunning(false);
   };
 
@@ -259,17 +275,30 @@ function Bots() {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>Bot Management</h2>
-        <div className="flex gap-sm" style={{ alignItems: "center" }}>
-          <span className="badge badge-active" style={{ fontSize: "0.7rem", marginRight: "0.5rem" }}>
-            LIVE DATA
-          </span>
-          <span className={`badge ${running ? "badge-active" : "badge-stopped"}`}>
-            <span className="badge-dot" />
-            {running ? "Running" : "Stopped"}
-          </span>
-        </div>
+      <div className="page-header" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>Bot Management</h2>
+        <span className="badge badge-active" style={{ fontSize: "0.7rem" }}>LIVE DATA</span>
+        <span className={`badge ${running ? "badge-active" : "badge-stopped"}`}>
+          <span className="badge-dot" />
+          {running ? "Running" : "Stopped"}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1rem" }}>
+        <select
+          value={activeAccount}
+          onChange={(e) => setActiveAccount(e.target.value)}
+          style={{
+            background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)",
+            borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.85rem", cursor: "pointer",
+            flex: "1 1 auto", minWidth: 0,
+          }}
+        >
+          {accounts.map((a) => (
+            <option key={a.name} value={a.name}>
+              {a.label}{a.daily_target_pct ? ` (${a.daily_target_pct}%)` : ""}{a.target_hit ? " HIT" : ""}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="card mb-md" style={{ textAlign: "center", padding: "1.5rem" }}>

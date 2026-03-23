@@ -305,7 +305,19 @@ async def stop_bots(_auth=Depends(require_auth)):
 
 
 @app.get("/api/bots/running")
-async def bots_running():
+async def bots_running(account: str = "default"):
+    if account != "default":
+        from app.core.accounts import account_manager
+        try:
+            acct = account_manager.get(account)
+            result = {}
+            for bt_name, bot in acct.bots.items():
+                result[bt_name] = {"running": bot.running, "active_trades": len(bot.active_trades)}
+            if "arbitrage" not in result:
+                result["arbitrage"] = {"running": False, "active_trades": 0, "trades_executed": 0}
+            return result
+        except Exception:
+            pass
     return {
         "scalper": {"running": scalper_bot.running, "active_trades": len(scalper_bot.active_trades)},
         "swing": {"running": swing_bot.running, "active_trades": len(swing_bot.active_trades)},

@@ -597,13 +597,23 @@ async def rebalance(req: RebalanceRequest, _auth=Depends(require_auth)):
 
 
 @router.get("/bots/status")
-async def get_bot_status():
+async def get_bot_status(account: str = "default"):
+    acct = _resolve_account(account)
+    kv = acct.risk_engine._store
+    all_bots = _get_all_bots(account)
+    bot_map = {getattr(b, 'bot_type', None): b for b in all_bots if hasattr(b, 'bot_type')}
     bots = {}
     for bot_type in ["scalper", "swing", "long_term", "grid", "mean_reversion", "momentum", "dca"]:
-        trades = await store.hgetall(f"active_trades:{bot_type}")
+        trades = await kv.hgetall(f"active_trades:{bot_type}")
+        bot_inst = bot_map.get(None)
+        for b in all_bots:
+            if hasattr(b, 'bot_type') and b.bot_type.value == bot_type:
+                bot_inst = b
+                break
         bots[bot_type] = {
             "active_trades": len(trades),
             "trades": [json.loads(v) for v in trades.values()],
+            "running": bot_inst.running if bot_inst else False,
         }
     return bots
 

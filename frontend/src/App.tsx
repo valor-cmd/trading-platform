@@ -1,4 +1,4 @@
-import { Routes, Route, NavLink } from "react-router-dom";
+import { Routes, Route, NavLink, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import Dashboard from "./pages/Dashboard";
 import Bots from "./pages/Bots";
@@ -6,14 +6,28 @@ import Accounting from "./pages/Accounting";
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
 import Hummingbot from "./pages/Hummingbot";
-import { getHealth } from "./services/api";
+import { getHealth, getAccounts } from "./services/api";
+
+interface AccountInfo { name: string; label: string; daily_target_pct: number | null; target_hit: boolean; }
 
 function App() {
   const [paperMode, setPaperMode] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
+  const activeAccount = searchParams.get("account") || "default";
+
+  const setActiveAccount = (name: string) => {
+    const p = new URLSearchParams(searchParams);
+    if (name === "default") p.delete("account"); else p.set("account", name);
+    setSearchParams(p, { replace: true });
+  };
 
   useEffect(() => {
     getHealth()
       .then((r) => setPaperMode(r.data.paper_trading))
+      .catch(() => {});
+    getAccounts()
+      .then((r) => setAccounts(r.data || []))
       .catch(() => {});
   }, []);
 
@@ -94,8 +108,8 @@ function App() {
 
       <main className="content">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/bots" element={<Bots />} />
+          <Route path="/" element={<Dashboard activeAccount={activeAccount} setActiveAccount={setActiveAccount} accounts={accounts} reloadAccounts={() => getAccounts().then(r => setAccounts(r.data || [])).catch(() => {})} />} />
+          <Route path="/bots" element={<Bots activeAccount={activeAccount} setActiveAccount={setActiveAccount} accounts={accounts} />} />
           <Route path="/accounting" element={<Accounting />} />
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/hummingbot" element={<Hummingbot />} />

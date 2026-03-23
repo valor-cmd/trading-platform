@@ -8,7 +8,7 @@ import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
   getLiveBalance, resetAccount, getOHLCV, getConfig, updateConfig,
-  getAccounts, createAccount, startAccountBots, stopAccountBots,
+  createAccount, startAccountBots, stopAccountBots,
   closeTrade,
 } from "../services/api";
 
@@ -275,10 +275,15 @@ interface AccountInfo {
   target_hit: boolean;
 }
 
-function Dashboard() {
+interface DashboardProps {
+  activeAccount: string;
+  setActiveAccount: (name: string) => void;
+  accounts: AccountInfo[];
+  reloadAccounts: () => void;
+}
+
+function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }: DashboardProps) {
   const navigate = useNavigate();
-  const [activeAccount, setActiveAccount] = useState("default");
-  const [accounts, setAccountsList] = useState<AccountInfo[]>([]);
   const [showCreateAccount, setShowCreateAccount] = useState(false);
   const [newAcctName, setNewAcctName] = useState("");
   const [newAcctLabel, setNewAcctLabel] = useState("");
@@ -316,21 +321,14 @@ function Dashboard() {
   const [riskCfgMsg, setRiskCfgMsg] = useState("");
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
-  const loadAccounts = async () => {
-    try {
-      const r = await getAccounts();
-      setAccountsList(r.data || []);
-    } catch {}
-  };
-
   const load = async () => {
     try {
       const results = await Promise.allSettled([
         getAccountingSummary(activeAccount),
         getRiskStatus(),
-        getBotStatus(),
+        getBotStatus(activeAccount),
         getPortfolioChart(2000, activeAccount),
-        getBotsRunning(),
+        getBotsRunning(activeAccount),
         getArbStatus(),
         getLiveBalance(activeAccount),
       ]);
@@ -420,7 +418,6 @@ function Dashboard() {
   };
 
   useEffect(() => {
-    loadAccounts();
     getConfig().then((r) => {
       const c = { max_daily_loss_usd: r.data.max_daily_loss_usd, max_position_size_usd: r.data.max_position_size_usd, default_stop_loss_pct: r.data.default_stop_loss_pct, max_leverage: r.data.max_leverage };
       setRiskCfg(c);
@@ -649,7 +646,7 @@ function Dashboard() {
                   });
                   setShowCreateAccount(false);
                   setNewAcctName(""); setNewAcctLabel("");
-                  await loadAccounts();
+                  await reloadAccounts();
                   setActiveAccount(newAcctName);
                 } catch (e: any) {
                   alert(e?.response?.data?.detail || "Failed to create account");

@@ -240,6 +240,9 @@ class RiskEngine:
         allocation = await self.get_bucket_allocation()
         allocation.total_capital_usd = total_capital
 
+        for bt in ["scalper", "swing", "long_term", "arbitrage", "grid", "mean_reversion", "momentum", "dca"]:
+            setattr(allocation, f"{bt}_used_usd", open_positions.get(bt, 0.0))
+
         if self._trade_store_ref:
             ts = self._trade_store_ref
         else:

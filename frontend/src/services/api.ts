@@ -76,9 +76,9 @@ export const runBacktest = (data: {
 
 export const getRiskStatus = () => api.get("/risk/status");
 
-export const getBotStatus = () => api.get("/bots/status");
+export const getBotStatus = (account = "default") => api.get("/bots/status", { params: { account } });
 
-export const getBotsRunning = () => api.get("/bots/running");
+export const getBotsRunning = (account = "default") => api.get("/bots/running", { params: { account } });
 
 export const startBots = (exchangeId: string) => api.post(`/bots/start/${exchangeId}`);
 
