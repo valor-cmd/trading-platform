@@ -10,6 +10,7 @@ from app.core.security import require_auth, RateLimitMiddleware
 
 from app.api.routes import router, risk_engine, _fast_live_balance
 from app.api.hummingbot_routes import hbot_router
+from app.api.intel_routes import intel_router
 from app.hummingbot.manager import hbot_manager
 from app.core.store import trade_store
 from app.exchange.simulator import paper_exchange
@@ -252,6 +253,7 @@ app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
 
 app.include_router(router, prefix="/api")
 app.include_router(hbot_router, prefix="/api")
+app.include_router(intel_router, prefix="/api")
 
 
 @app.post("/api/bots/start/{exchange_id}")

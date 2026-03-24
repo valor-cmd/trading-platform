@@ -1,4 +1,4 @@
-import { Routes, Route, NavLink, useSearchParams, useLocation } from "react-router-dom";
+import { Routes, Route, NavLink, useSearchParams } from "react-router-dom";
 import { useEffect, useState, useMemo } from "react";
 import Dashboard from "./pages/Dashboard";
 import Bots from "./pages/Bots";
@@ -6,9 +6,10 @@ import Accounting from "./pages/Accounting";
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
 import Hummingbot from "./pages/Hummingbot";
+import Intelligence from "./pages/Intelligence";
 import { getHealth, getAccounts } from "./services/api";
 
-interface AccountInfo { name: string; label: string; daily_target_pct: number | null; target_hit: boolean; }
+interface AccountInfo { name: string; label: string; daily_target_pct: number | null; max_daily_loss_usd: number; auto_stop_on_target: boolean; balance_usd: number; active: boolean; target_hit: boolean; }
 
 function App() {
   const [paperMode, setPaperMode] = useState(true);
@@ -62,6 +63,10 @@ function App() {
             <span className="nav-icon">▦</span>
             Backtest
           </NavLink>
+          <NavLink to={linkTo("/intel")}>
+            <span className="nav-icon">◉</span>
+            Intel
+          </NavLink>
           <NavLink to={linkTo("/hummingbot")}>
             <span className="nav-icon">⬡</span>
             Hummingbot
@@ -101,9 +106,9 @@ function App() {
             <span className="mobile-nav-icon">▦</span>
             Backtest
           </NavLink>
-          <NavLink to={linkTo("/hummingbot")}>
-            <span className="mobile-nav-icon">⬡</span>
-            HBot
+          <NavLink to={linkTo("/intel")}>
+            <span className="mobile-nav-icon">◉</span>
+            Intel
           </NavLink>
           <NavLink to={linkTo("/settings")}>
             <span className="mobile-nav-icon">⚙</span>
@@ -118,6 +123,7 @@ function App() {
           <Route path="/bots" element={<Bots activeAccount={activeAccount} setActiveAccount={setActiveAccount} accounts={accounts} />} />
           <Route path="/accounting" element={<Accounting />} />
           <Route path="/backtest" element={<Backtest />} />
+          <Route path="/intel" element={<Intelligence />} />
           <Route path="/hummingbot" element={<Hummingbot />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

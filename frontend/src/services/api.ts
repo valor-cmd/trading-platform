@@ -243,4 +243,44 @@ export const startAccountBots = (name: string) => api.post(`/accounts/${name}/st
 
 export const stopAccountBots = (name: string) => api.post(`/accounts/${name}/stop-bots`);
 
+export const getIntelSignals = (maxAge = 600) => api.get("/intel/signals", { params: { max_age: maxAge } });
+
+export const getIntelSummary = () => api.get("/intel/summary");
+
+export const getIntelBotBoost = (symbol: string, botType = "momentum") =>
+  api.get("/intel/bot-boost", { params: { symbol, bot_type: botType } });
+
+export const refreshIntel = () => api.post("/intel/refresh");
+
+export const getIntelCryptopanic = (force = false) => api.get("/intel/news/cryptopanic", { params: { force } });
+
+export const getIntelNewsPro = (force = false) => api.get("/intel/news/pro", { params: { force } });
+
+export const getIntelPumpDetector = (symbol?: string, force = false) =>
+  api.get("/intel/pump-detector", { params: { symbol, force } });
+
+export const getIntelWhaleTracker = (force = false) => api.get("/intel/whale-tracker", { params: { force } });
+
+export const getIntelCoinmarketcap = (force = false) => api.get("/intel/coinmarketcap", { params: { force } });
+
+export const getIntelYahoo = (symbols = "BTC-USD,ETH-USD,SOL-USD", days = "7", interval = "1d", force = false) =>
+  api.get("/intel/yahoo-finance", { params: { symbols, days, interval, force } });
+
+export const getIntelTwitterSentiment = (query = "$BTC", force = false) =>
+  api.get("/intel/twitter/sentiment", { params: { query, force } });
+
+export const getIntelTwitterStream = (users = "", force = false) =>
+  api.get("/intel/twitter/stream", { params: { users, force } });
+
+export const getIntelFinanceAgent = (ticker = "BTC-USD", force = false) =>
+  api.get("/intel/finance-agent", { params: { ticker, force } });
+
+export const getIntelKepler = (force = false) => api.get("/intel/kepler", { params: { force } });
+
+export const getIntelTokenScanner = (symbol = "BTC", force = false) =>
+  api.get("/intel/token-scanner", { params: { symbol, force } });
+
+export const getIntelCoinskid = (page = "ckr_index", force = false) =>
+  api.get(`/intel/coinskid/${page}`, { params: { force } });
+
 export default api;

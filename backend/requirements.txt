@@ -12,3 +12,4 @@ aiohttp
 slowapi
 python-jose[cryptography]
 passlib[bcrypt]
+apify-client

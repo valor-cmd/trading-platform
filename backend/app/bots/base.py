@@ -255,6 +255,13 @@ class BaseBot(ABC):
                 analyzer = TechnicalAnalyzer(df)
                 signal = analyzer.analyze()
 
+                try:
+                    from app.services.apify_intel import apify_intel
+                    intel_boost = apify_intel.get_bot_signal_boost(symbol, self.bot_type.value)
+                    signal.confidence = min(1.0, max(0.0, signal.confidence + intel_boost["boost"]))
+                except Exception:
+                    pass
+
                 has_open = any(t["symbol"] == symbol for t in self.active_trades)
                 if not has_open and can_open:
                     if signal.confidence < min_conf:

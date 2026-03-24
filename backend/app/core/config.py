@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     api_secret_key: str = ""
 
+    apify_api_token: str = ""
+    openai_api_key: str = ""
+
     fear_greed_api_url: str = "https://api.alternative.me/fng/"
 
     max_position_size_usd: float = 500.0
