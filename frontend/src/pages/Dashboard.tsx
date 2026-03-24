@@ -872,7 +872,7 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
         </div>
         <div className="action-btn" onClick={async () => {
           if (window.confirm("Reset account to zero? This clears all trades, deposits, and balance.")) {
-            await resetAccount();
+            await resetAccount(activeAccount);
             await load();
           }
         }} style={{ cursor: "pointer" }}>

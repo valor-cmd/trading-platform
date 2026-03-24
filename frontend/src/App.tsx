@@ -1,5 +1,5 @@
-import { Routes, Route, NavLink, useSearchParams } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { Routes, Route, NavLink, useSearchParams, useLocation } from "react-router-dom";
+import { useEffect, useState, useMemo } from "react";
 import Dashboard from "./pages/Dashboard";
 import Bots from "./pages/Bots";
 import Accounting from "./pages/Accounting";
@@ -22,6 +22,12 @@ function App() {
     setSearchParams(p, { replace: true });
   };
 
+  const acctParam = searchParams.get("account");
+  const linkTo = useMemo(() => (path: string) => {
+    if (acctParam && acctParam !== "default") return `${path}?account=${acctParam}`;
+    return path;
+  }, [acctParam]);
+
   useEffect(() => {
     getHealth()
       .then((r) => setPaperMode(r.data.paper_trading))
@@ -40,27 +46,27 @@ function App() {
         </div>
 
         <div className="sidebar-nav">
-          <NavLink to="/" end>
+          <NavLink to={linkTo("/")} end>
             <span className="nav-icon">◎</span>
             Dashboard
           </NavLink>
-          <NavLink to="/bots">
+          <NavLink to={linkTo("/bots")}>
             <span className="nav-icon">⚡</span>
             Bots
           </NavLink>
-          <NavLink to="/accounting">
+          <NavLink to={linkTo("/accounting")}>
             <span className="nav-icon">◈</span>
             Accounting
           </NavLink>
-          <NavLink to="/backtest">
+          <NavLink to={linkTo("/backtest")}>
             <span className="nav-icon">▦</span>
             Backtest
           </NavLink>
-          <NavLink to="/hummingbot">
+          <NavLink to={linkTo("/hummingbot")}>
             <span className="nav-icon">⬡</span>
             Hummingbot
           </NavLink>
-          <NavLink to="/settings">
+          <NavLink to={linkTo("/settings")}>
             <span className="nav-icon">⚙</span>
             Settings
           </NavLink>
@@ -80,26 +86,26 @@ function App() {
 
       <div className="mobile-nav">
         <div className="mobile-nav-inner">
-          <NavLink to="/" end>
+          <NavLink to={linkTo("/")} end>
             <span className="mobile-nav-icon">◎</span>
             Home
           </NavLink>
-          <NavLink to="/accounting">
+          <NavLink to={linkTo("/accounting")}>
             <span className="mobile-nav-icon">◈</span>
             P&L
           </NavLink>
-          <NavLink to="/bots" className="trade-btn">
+          <NavLink to={linkTo("/bots")} className="trade-btn">
             <span>⚡</span>
           </NavLink>
-          <NavLink to="/backtest">
+          <NavLink to={linkTo("/backtest")}>
             <span className="mobile-nav-icon">▦</span>
             Backtest
           </NavLink>
-          <NavLink to="/hummingbot">
+          <NavLink to={linkTo("/hummingbot")}>
             <span className="mobile-nav-icon">⬡</span>
             HBot
           </NavLink>
-          <NavLink to="/settings">
+          <NavLink to={linkTo("/settings")}>
             <span className="mobile-nav-icon">⚙</span>
             Settings
           </NavLink>
