@@ -349,7 +349,7 @@ async def all_pairs():
 
 
 @app.get("/api/exchanges/{exchange_id}/pairs")
-async def exchange_pairs(exchange_id: str, q: str = "", limit: int = 200, offset: int = 0):
+async def exchange_pairs(exchange_id: str, q: str = "", limit: int = 5000, offset: int = 0):
     adapter = exchange_registry.get(exchange_id)
     if not adapter:
         return {"exchange_id": exchange_id, "pairs": [], "total": 0}

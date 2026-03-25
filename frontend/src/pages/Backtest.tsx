@@ -54,6 +54,10 @@ interface StrategyPreset {
     initial_capital: number;
     risk_per_trade_pct: number;
     limit: number;
+    sl_atr_multiplier: number;
+    tp_rr_ratio: number;
+    min_confidence: number;
+    min_confirmations: number;
   };
 }
 
@@ -66,7 +70,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "⚡",
     description: "Scalps trending regimes (ADX>25) using RSI extremes + MACD crossovers with PSAR + Vortex confirmation. Blocks trades in chaotic markets. Requires 3+ confirmations and regime-adjusted score of 4.0+. Uses StochRSI and MFI for precision entries.",
     indicators: ["ADX regime filter", "RSI(14)", "MACD crossover", "PSAR direction", "Vortex(14)", "StochRSI", "MFI(14)", "BB squeeze"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "5m", initial_capital: 1000, risk_per_trade_pct: 2, limit: 500 },
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "15m", initial_capital: 1000, risk_per_trade_pct: 1.5, limit: 500, sl_atr_multiplier: 1.2, tp_rr_ratio: 2.5, min_confidence: 0.12, min_confirmations: 2 },
   },
   {
     id: "scalper_mean_reversion",
@@ -76,7 +80,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "🎯",
     description: "Detects Bollinger/Keltner squeeze (BB inside KC) for imminent breakouts. Enters on squeeze release with OBV volume confirmation and Williams %R extremes. Only trades in ranging regimes where mean reversion has highest probability.",
     indicators: ["BB/KC squeeze detect", "Williams %R", "OBV trend", "Keltner Channel", "RSI(14)", "CMF(20)", "Volume spike"],
-    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "5m", initial_capital: 1000, risk_per_trade_pct: 2, limit: 500 },
+    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "15m", initial_capital: 1000, risk_per_trade_pct: 1.5, limit: 500, sl_atr_multiplier: 1.3, tp_rr_ratio: 2.0, min_confidence: 0.10, min_confirmations: 2 },
   },
   {
     id: "swing_trend",
@@ -86,7 +90,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "〰",
     description: "Rides confirmed trends by requiring ADX>25 + EMA(9/21/50) alignment + PSAR direction agreement. Sentiment-weighted via Fear & Greed contrarian filter. Blocks ranging/chaotic regimes. Exits on triple bearish confirmation (PSAR + OBV + Vortex reversal).",
     indicators: ["ADX trend strength", "EMA(9,21,50)", "PSAR(0.02)", "OBV + EMA", "Vortex(14)", "Fear & Greed", "MACD crossover", "MFI(14)"],
-    params: { exchange_id: "coinbase", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 500 },
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.5, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
   },
   {
     id: "swing_breakout",
@@ -96,7 +100,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "📊",
     description: "Waits for 3+ directional confirmations: EMA alignment + MACD + PSAR + OBV all agreeing on direction. ADX must show trend (>20). Rejects contradictory signals (e.g. bullish entry with strong bearish EMA + ADX). Regime-adaptive scoring.",
     indicators: ["ADX(14) > 20", "EMA stack", "PSAR + MACD agree", "OBV accumulation", "Keltner breakout", "Volume confirm", "Contradiction filter"],
-    params: { exchange_id: "binance", symbol: "SOL/USDT", timeframe: "4h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 300 },
+    params: { exchange_id: "binance", symbol: "SOL/USDT", timeframe: "4h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.8, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
   },
   {
     id: "long_term_macro",
@@ -106,7 +110,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "📈",
     description: "Long-term accumulation weighted by market regime + sentiment. Buys aggressively during Extreme Fear in trending-up regimes. Requires ADX trend confirmation + weekly EMA(50/200) cross. MFI and OBV confirm institutional accumulation. Blocks chaotic/ranging markets.",
     indicators: ["Market Regime", "Fear & Greed (3x weight)", "ADX trend", "EMA(50,200)", "MFI institutional", "OBV accumulation", "PSAR weekly", "RSI extremes"],
-    params: { exchange_id: "coinbase", symbol: "BTC/USDT", timeframe: "1d", initial_capital: 5000, risk_per_trade_pct: 1.5, limit: 365 },
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1d", initial_capital: 5000, risk_per_trade_pct: 1.5, limit: 365, sl_atr_multiplier: 2.0, tp_rr_ratio: 3.0, min_confidence: 0.10, min_confirmations: 2 },
   },
   {
     id: "grid_range",
@@ -116,7 +120,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "⊞",
     description: "Only activates in RANGING regime (ADX<20, low BB width). Places grid between Bollinger Bands with Keltner Channel confirmation. Uses RSI + StochRSI for entry timing within the range. Automatically pauses when regime shifts to trending or volatile.",
     indicators: ["Regime: ranging only", "ADX < 20 filter", "BB range bounds", "Keltner Channel", "RSI mean reversion", "StochRSI timing", "BB width percentile"],
-    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "15m", initial_capital: 2000, risk_per_trade_pct: 1, limit: 500 },
+    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "1h", initial_capital: 2000, risk_per_trade_pct: 1, limit: 500, sl_atr_multiplier: 1.0, tp_rr_ratio: 1.5, min_confidence: 0.10, min_confirmations: 2 },
   },
   {
     id: "multi_factor",
@@ -126,7 +130,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "◈",
     description: "Highest conviction trades only. Requires 6+ factors aligned: RSI zone + MACD crossover + EMA alignment + ADX trend + PSAR direction + OBV/MFI volume confirmation + sentiment. Minimum score 5.0/14 with 3+ confirmations. Contradiction detection blocks conflicting setups.",
     indicators: ["RSI + StochRSI", "MACD + signal", "EMA(9,21,50) stack", "ADX(14) + DI", "PSAR + Vortex", "OBV + MFI + CMF", "Sentiment bias", "Contradiction filter"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 3000, risk_per_trade_pct: 2, limit: 500 },
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 3000, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.5, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
   },
   {
     id: "arb_cross_exchange",
@@ -136,7 +140,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "⇄",
     description: "Scans price differentials across 9+ CEXs and DEXs simultaneously. Executes when spread exceeds 0.3% after fees. Simultaneous buy on cheaper exchange and sell on expensive one. Max 5% capital per trade, 3 concurrent positions.",
     indicators: ["Price spread > 0.3%", "Fee calculation", "Liquidity check", "Slippage estimate"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1m", initial_capital: 5000, risk_per_trade_pct: 5, limit: 200 },
+    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "5m", initial_capital: 5000, risk_per_trade_pct: 3, limit: 500, sl_atr_multiplier: 1.0, tp_rr_ratio: 1.5, min_confidence: 0.10, min_confirmations: 2 },
   },
 ];
 
@@ -159,16 +163,21 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { valu
 
 function Backtest() {
   const [form, setForm] = useState({
-    exchange_id: "coinbase",
+    exchange_id: "binance",
     symbol: "BTC/USDT",
     timeframe: "1h",
     initial_capital: 1000,
     risk_per_trade_pct: 2,
     limit: 500,
+    sl_atr_multiplier: 1.5,
+    tp_rr_ratio: 2.0,
+    min_confidence: 0.15,
+    min_confirmations: 3,
   });
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [exchanges, setExchanges] = useState<Record<string, ExchangeInfo>>({});
   const [symbols, setSymbols] = useState<string[]>([]);
   const [symbolSearch, setSymbolSearch] = useState("");
@@ -200,15 +209,19 @@ function Backtest() {
     setActivePreset(preset.id);
     setForm(preset.params);
     setResult(null);
+    setError(null);
   };
 
   const handleRun = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await runBacktest(form);
       setResult(res.data);
-    } catch {
-      alert("Backtest failed. Make sure exchange is connected.");
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? "Backtest failed. Check exchange connection and symbol.";
+      setError(msg);
     }
     setLoading(false);
   };
@@ -230,8 +243,8 @@ function Backtest() {
     });
 
   const filteredSymbols = symbolSearch
-    ? symbols.filter((s) => s.toLowerCase().includes(symbolSearch.toLowerCase())).slice(0, 50)
-    : symbols.slice(0, 50);
+    ? symbols.filter((s) => s.toLowerCase().includes(symbolSearch.toLowerCase())).slice(0, 200)
+    : symbols.slice(0, 200);
 
   const formatExchangeName = (id: string, info: ExchangeInfo) => {
     const label = id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -388,7 +401,7 @@ function Backtest() {
                 background: "#1a1a1a",
                 border: "1px solid #333",
                 borderRadius: 8,
-                maxHeight: 200,
+                maxHeight: 300,
                 overflowY: "auto",
                 zIndex: 100,
               }}>
@@ -449,6 +462,19 @@ function Backtest() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="card mb-md" style={{
+          border: "1px solid var(--red, #ff4d6a)",
+          background: "rgba(255,77,106,0.08)",
+          padding: "1rem",
+        }}>
+          <div style={{ color: "var(--red, #ff4d6a)", fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.25rem" }}>
+            Backtest Error
+          </div>
+          <div style={{ color: "var(--text-secondary, #888)", fontSize: "0.85rem" }}>{error}</div>
+        </div>
+      )}
 
       {result && (
         <>
@@ -513,11 +539,11 @@ function Backtest() {
                 {[
                   { label: "Symbol", value: result.symbol },
                   { label: "Timeframe", value: result.timeframe },
-                  { label: "Period", value: `${result.start_date?.slice(0, 10)} → ${result.end_date?.slice(0, 10)}` },
+                  { label: "Period", value: `${result.start_date?.slice(0, 10)} -> ${result.end_date?.slice(0, 10)}` },
                   { label: "Total Trades", value: String(result.total_trades) },
                   { label: "Total P&L", value: `$${result.total_pnl_usd.toFixed(2)}`, cls: result.total_pnl_usd >= 0 ? "positive" : "negative" },
                   { label: "Total Fees", value: `$${result.total_fees_usd.toFixed(2)}`, cls: "negative" },
-                  { label: "Initial → Final", value: `$${result.initial_capital} → $${result.final_capital}` },
+                  { label: "Initial -> Final", value: `$${result.initial_capital} -> $${result.final_capital}` },
                 ].map((row) => (
                   <div className="flex-between" key={row.label} style={{ padding: "0.55rem 0", borderBottom: "1px solid var(--border)" }}>
                     <span className="text-sm text-secondary">{row.label}</span>
@@ -568,11 +594,13 @@ function Backtest() {
                           padding: "0.15rem 0.5rem",
                           borderRadius: "var(--radius-full)",
                           background: t.exit_reason === "take_profit" ? "var(--green-dim)" :
-                            t.exit_reason === "stop_loss" ? "var(--red-dim)" : "var(--yellow-dim)",
+                            t.exit_reason === "stop_loss" ? "var(--red-dim)" :
+                            t.exit_reason === "trailing_stop" ? "var(--yellow-dim)" : "var(--yellow-dim)",
                           color: t.exit_reason === "take_profit" ? "var(--green)" :
-                            t.exit_reason === "stop_loss" ? "var(--red)" : "var(--yellow)",
+                            t.exit_reason === "stop_loss" ? "var(--red)" :
+                            t.exit_reason === "trailing_stop" ? "var(--yellow)" : "var(--yellow)",
                         }}>
-                          {t.exit_reason.replace("_", " ")}
+                          {t.exit_reason.replace(/_/g, " ")}
                         </span>
                       </td>
                     </tr>
@@ -584,7 +612,7 @@ function Backtest() {
         </>
       )}
 
-      {!result && !loading && (
+      {!result && !loading && !error && (
         <div className="card" style={{ textAlign: "center", padding: "3rem" }}>
           <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>▦</div>
           <div style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.5rem" }}>

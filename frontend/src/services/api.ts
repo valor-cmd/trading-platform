@@ -72,6 +72,10 @@ export const runBacktest = (data: {
   initial_capital: number;
   risk_per_trade_pct: number;
   limit: number;
+  sl_atr_multiplier?: number;
+  tp_rr_ratio?: number;
+  min_confidence?: number;
+  min_confirmations?: number;
 }) => api.post("/backtest", data);
 
 export const getRiskStatus = () => api.get("/risk/status");

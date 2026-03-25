@@ -188,6 +188,10 @@ class BacktestRequest(BaseModel):
     initial_capital: float = 1000.0
     risk_per_trade_pct: float = 2.0
     limit: int = 500
+    sl_atr_multiplier: float = 1.5
+    tp_rr_ratio: float = 2.0
+    min_confidence: float = 0.15
+    min_confirmations: int = 3
 
 
 class RebalanceRequest(BaseModel):
@@ -533,14 +537,21 @@ def get_live_balance(account: str = "default"):
 
 @router.post("/backtest")
 async def run_backtest(req: BacktestRequest, _auth=Depends(require_auth)):
-    df = await paper_exchange.fetch_ohlcv(req.exchange_id, req.symbol, req.timeframe, limit=req.limit)
-    if len(df) < 201:
-        raise HTTPException(status_code=400, detail="Not enough candle data for backtest")
+    try:
+        df = await paper_exchange.fetch_ohlcv(req.exchange_id, req.symbol, req.timeframe, limit=req.limit)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch data for {req.symbol} on {req.exchange_id}: {str(e)}")
+    if len(df) < 50:
+        raise HTTPException(status_code=400, detail=f"Not enough candle data ({len(df)} candles). Need at least 50.")
     engine = BacktestEngine()
     result = engine.run(
         df, req.symbol, req.timeframe,
         initial_capital=req.initial_capital,
         risk_per_trade_pct=req.risk_per_trade_pct,
+        sl_atr_multiplier=req.sl_atr_multiplier,
+        tp_rr_ratio=req.tp_rr_ratio,
+        min_confidence=req.min_confidence,
+        min_confirmations=req.min_confirmations,
     )
     return {
         "symbol": result.symbol,
