@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from app.bots.base import BaseBot
 from app.exchange.simulator import PaperExchangeManager
@@ -31,6 +30,9 @@ class MomentumBot(BaseBot):
         if signal.overall_signal == "hold":
             return False
 
+        if signal.adx < 20:
+            return False
+
         score = 0.0
 
         has_ema_trend = False
@@ -56,33 +58,52 @@ class MomentumBot(BaseBot):
             ema_bullish = signal.ema_trend in ("bullish", "strong_bullish")
             macd_bullish = signal.macd_signal in ("bullish", "bullish_crossover")
             if ema_bullish == macd_bullish:
-                score += 1.5
+                score += 2.0
+            else:
+                score -= 1.0
 
         has_volume = False
         if signal.volume_trend == "very_high":
-            score += 2.0
+            score += 2.5
             has_volume = True
         elif signal.volume_trend == "high":
-            score += 1.0
+            score += 1.5
             has_volume = True
 
-        if signal.adx >= 30:
+        if not has_volume:
+            score -= 1.0
+
+        if signal.adx >= 35:
+            score += 2.5
+        elif signal.adx >= 30:
             score += 2.0
         elif signal.adx >= 25:
             score += 1.0
-        elif signal.adx < 20:
-            return False
 
         if signal.psar_direction in ("bullish", "bearish"):
             if signal.ema_trend and signal.ema_trend.replace("strong_", "") == signal.psar_direction:
                 score += 1.5
 
         if signal.vortex_signal in ("bullish", "bearish"):
-            score += 0.5
+            if signal.ema_trend and signal.ema_trend.replace("strong_", "") == signal.vortex_signal:
+                score += 1.0
 
         if signal.obv_trend in ("bullish", "bearish"):
             if signal.ema_trend and signal.ema_trend.replace("strong_", "") == signal.obv_trend:
                 score += 1.0
+
+        if signal.trend_consistency > 0.7:
+            score += 1.5
+        elif signal.trend_consistency > 0.5:
+            score += 0.5
+
+        if signal.squeeze_on and signal.squeeze_momentum != 0:
+            if (signal.squeeze_momentum > 0 and signal.overall_signal in ("buy", "strong_buy")) or \
+               (signal.squeeze_momentum < 0 and signal.overall_signal in ("sell", "strong_sell")):
+                score += 1.5
+
+        if signal.candle_strength == "strong":
+            score += 1.0
 
         sentiment_bias = sentiment.get("bias", "neutral")
         if sentiment_bias in ("lean_buy",) and signal.ema_trend in ("bullish", "strong_bullish"):
@@ -90,29 +111,29 @@ class MomentumBot(BaseBot):
         elif sentiment_bias in ("lean_sell",) and signal.ema_trend in ("bearish", "strong_bearish"):
             score += 0.5
 
-        return score >= 7.0
+        return score >= 8.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         if trade["side"] == "buy":
-            if signal.macd_signal in ("bearish_crossover",):
+            if signal.macd_signal == "bearish_crossover" and signal.ema_trend in ("bearish", "strong_bearish"):
                 return True
-            if signal.ema_trend in ("bearish", "strong_bearish") and signal.adx >= 25:
+            if signal.ema_trend == "strong_bearish" and signal.adx >= 25 and signal.psar_direction == "bearish":
                 return True
-            if signal.psar_direction == "bearish" and signal.vortex_signal == "bearish":
+            if signal.psar_direction == "bearish" and signal.vortex_signal == "bearish" and signal.obv_trend == "bearish":
                 return True
         else:
-            if signal.macd_signal in ("bullish_crossover",):
+            if signal.macd_signal == "bullish_crossover" and signal.ema_trend in ("bullish", "strong_bullish"):
                 return True
-            if signal.ema_trend in ("bullish", "strong_bullish") and signal.adx >= 25:
+            if signal.ema_trend == "strong_bullish" and signal.adx >= 25 and signal.psar_direction == "bullish":
                 return True
-            if signal.psar_direction == "bullish" and signal.vortex_signal == "bullish":
+            if signal.psar_direction == "bullish" and signal.vortex_signal == "bullish" and signal.obv_trend == "bullish":
                 return True
 
         if signal.adx < 15:
             return True
 
         regime = signal.regime
-        if regime and regime.regime in (MarketRegime.RANGING, MarketRegime.CHAOTIC):
+        if regime and regime.regime == MarketRegime.CHAOTIC:
             return True
 
         return False

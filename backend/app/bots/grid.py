@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from app.bots.base import BaseBot
 from app.exchange.simulator import PaperExchangeManager
@@ -37,22 +36,30 @@ class GridBot(BaseBot):
         if signal.atr <= 0:
             return False
 
+        if signal.adx >= 25:
+            return False
+
         score = 0.0
 
         if regime.regime == MarketRegime.RANGING:
             score += 3.0
+
+        if regime.regime == MarketRegime.VOLATILE and signal.adx < 25:
+            score += 1.5
 
         if signal.bollinger_signal in ("oversold", "overbought"):
             score += 2.5
 
         if signal.rsi is not None:
             if signal.rsi < 25 or signal.rsi > 75:
-                score += 2.0
+                score += 2.5
             elif signal.rsi < 35 or signal.rsi > 65:
                 score += 1.0
 
         if signal.stoch_rsi_k < 15 or signal.stoch_rsi_k > 85:
             score += 1.5
+        elif signal.stoch_rsi_k < 20 or signal.stoch_rsi_k > 80:
+            score += 0.5
 
         if signal.mfi < 25 or signal.mfi > 75:
             score += 1.0
@@ -64,14 +71,20 @@ class GridBot(BaseBot):
             score += 1.0
 
         if signal.volume_trend in ("high", "very_high"):
-            score += 0.5
-
-        if signal.adx < 20:
             score += 1.0
-        elif signal.adx < 25:
-            score += 0.5
 
-        return score >= 5.0
+        if signal.adx < 15:
+            score += 1.5
+        elif signal.adx < 20:
+            score += 1.0
+
+        if signal.zscore < -1.5 or signal.zscore > 1.5:
+            score += 1.0
+
+        if signal.sr_proximity in ("near_support", "near_resistance"):
+            score += 1.0
+
+        return score >= 6.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime
@@ -84,5 +97,9 @@ class GridBot(BaseBot):
 
         if signal.adx >= 40:
             return True
+
+        if signal.ema_trend in ("strong_bullish", "strong_bearish") and signal.adx >= 30:
+            if signal.trend_consistency > 0.7:
+                return True
 
         return False

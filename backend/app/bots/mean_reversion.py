@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from app.bots.base import BaseBot
 from app.exchange.simulator import PaperExchangeManager
@@ -35,7 +34,18 @@ class MeanReversionBot(BaseBot):
         if signal.overall_signal == "hold":
             return False
 
+        if signal.adx >= 30:
+            return False
+
         score = 0.0
+
+        zscore_extreme = False
+        if abs(signal.zscore) >= 2.0:
+            score += 3.0
+            zscore_extreme = True
+        elif abs(signal.zscore) >= 1.5:
+            score += 1.5
+            zscore_extreme = True
 
         rsi_extreme = False
         if signal.rsi is not None:
@@ -57,11 +67,14 @@ class MeanReversionBot(BaseBot):
             score += 2.5
             bb_extreme = True
 
-        if not rsi_extreme and not bb_extreme:
+        if not rsi_extreme and not bb_extreme and not zscore_extreme:
             return False
 
-        if rsi_extreme and bb_extreme:
-            score += 1.5
+        extremes_count = sum([rsi_extreme, bb_extreme, zscore_extreme])
+        if extremes_count >= 2:
+            score += 2.0
+        elif extremes_count == 1:
+            score += 0.5
 
         if signal.stoch_rsi_k < 10 or signal.stoch_rsi_k > 90:
             score += 2.0
@@ -83,27 +96,42 @@ class MeanReversionBot(BaseBot):
             score += 1.0
 
         if signal.macd_signal in ("bullish_crossover", "bearish_crossover"):
-            score += 1.0
+            score += 1.5
+
+        if signal.sr_proximity == "near_support" and signal.overall_signal in ("buy", "strong_buy"):
+            score += 1.5
+        elif signal.sr_proximity == "near_resistance" and signal.overall_signal in ("sell", "strong_sell"):
+            score += 1.5
 
         if regime and regime.regime == MarketRegime.RANGING:
             score += 1.0
 
-        return score >= 6.0
+        return score >= 7.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
+        if abs(signal.zscore) < 0.5:
+            if trade["side"] == "buy" and signal.rsi is not None and signal.rsi > 50:
+                return True
+            if trade["side"] == "sell" and signal.rsi is not None and signal.rsi < 50:
+                return True
+
         if trade["side"] == "buy":
             if signal.rsi is not None and signal.rsi > 65:
                 return True
             if signal.bollinger_signal == "overbought" and signal.rsi is not None and signal.rsi > 55:
                 return True
-            if signal.macd_signal in ("bearish", "bearish_crossover") and signal.rsi is not None and signal.rsi > 50:
+            if signal.macd_signal in ("bearish", "bearish_crossover") and signal.rsi is not None and signal.rsi > 55:
+                return True
+            if signal.zscore > 1.5:
                 return True
         else:
             if signal.rsi is not None and signal.rsi < 35:
                 return True
             if signal.bollinger_signal == "oversold" and signal.rsi is not None and signal.rsi < 45:
                 return True
-            if signal.macd_signal in ("bullish", "bullish_crossover") and signal.rsi is not None and signal.rsi < 50:
+            if signal.macd_signal in ("bullish", "bullish_crossover") and signal.rsi is not None and signal.rsi < 45:
+                return True
+            if signal.zscore < -1.5:
                 return True
 
         return False

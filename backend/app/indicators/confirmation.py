@@ -119,6 +119,12 @@ def _score_scalper(signal: SignalResult, side: str, confs: list) -> float:
             s += 1.0; confs.append("Keltner oversold")
         if signal.macd_signal == "bullish_crossover":
             s += 1.0; confs.append("MACD bull cross")
+        if signal.sr_proximity == "near_support":
+            s += 1.0; confs.append("Near pivot support")
+        if signal.squeeze_on and signal.squeeze_momentum > 0:
+            s += 1.0; confs.append("Squeeze momentum bullish")
+        if signal.vwap_signal == "below":
+            s += 0.5; confs.append("Below VWAP")
     else:
         if signal.rsi_signal == "overbought":
             s += 2.5; confs.append("RSI overbought")
@@ -140,8 +146,16 @@ def _score_scalper(signal: SignalResult, side: str, confs: list) -> float:
             s += 1.0; confs.append("Keltner overbought")
         if signal.macd_signal == "bearish_crossover":
             s += 1.0; confs.append("MACD bear cross")
+        if signal.sr_proximity == "near_resistance":
+            s += 1.0; confs.append("Near pivot resistance")
+        if signal.squeeze_on and signal.squeeze_momentum < 0:
+            s += 1.0; confs.append("Squeeze momentum bearish")
+        if signal.vwap_signal == "above":
+            s += 0.5; confs.append("Above VWAP")
     if signal.volume_trend in ("high", "very_high"):
         s += 1.0; confs.append(f"Volume {signal.volume_trend}")
+    if signal.candle_strength == "strong":
+        s += 0.5; confs.append("Strong candle")
     return s
 
 
@@ -168,6 +182,12 @@ def _score_swing(signal: SignalResult, side: str, confs: list) -> float:
             s += 1.0; confs.append("OBV accumulation")
         if signal.rsi_signal == "oversold":
             s += 0.75
+        if signal.cmf > 0.1:
+            s += 0.75; confs.append("CMF buying pressure")
+        if signal.trend_consistency > 0.6:
+            s += 0.75; confs.append("High trend consistency")
+        if signal.sr_proximity == "near_support":
+            s += 0.75; confs.append("Near pivot support")
     else:
         if signal.ema_trend == "strong_bearish":
             s += 2.5; confs.append("Strong bearish EMA trend")
@@ -189,6 +209,12 @@ def _score_swing(signal: SignalResult, side: str, confs: list) -> float:
             s += 1.0; confs.append("OBV distribution")
         if signal.rsi_signal == "overbought":
             s += 0.75
+        if signal.cmf < -0.1:
+            s += 0.75; confs.append("CMF selling pressure")
+        if signal.trend_consistency > 0.6:
+            s += 0.75; confs.append("High trend consistency")
+        if signal.sr_proximity == "near_resistance":
+            s += 0.75; confs.append("Near pivot resistance")
     if signal.volume_trend in ("high", "very_high"):
         s += 0.5; confs.append(f"Volume {signal.volume_trend}")
     return s
@@ -217,6 +243,10 @@ def _score_long_term(signal: SignalResult, side: str, confs: list) -> float:
             s += 1.5; confs.append("OBV long-term accumulation")
         if signal.psar_direction == "bullish" and signal.vortex_signal == "bullish":
             s += 1.0; confs.append("PSAR+Vortex aligned bullish")
+        if signal.trend_consistency > 0.7:
+            s += 1.0; confs.append("Strong trend consistency")
+        if signal.cmf > 0.15:
+            s += 0.75; confs.append("CMF strong buying")
     else:
         if signal.ema_trend == "strong_bearish":
             s += 3.0; confs.append("Strong bearish macro trend")
@@ -238,6 +268,10 @@ def _score_long_term(signal: SignalResult, side: str, confs: list) -> float:
             s += 1.5; confs.append("OBV long-term distribution")
         if signal.psar_direction == "bearish" and signal.vortex_signal == "bearish":
             s += 1.0; confs.append("PSAR+Vortex aligned bearish")
+        if signal.trend_consistency > 0.7:
+            s += 1.0; confs.append("Strong trend consistency")
+        if signal.cmf < -0.15:
+            s += 0.75; confs.append("CMF strong selling")
     return s
 
 

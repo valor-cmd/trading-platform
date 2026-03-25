@@ -63,6 +63,17 @@ class SignalResult:
     confirmation_score: float = 0.0
     required_score: float = 0.0
     confirmations: list = field(default_factory=list)
+    zscore: float = 0.0
+    vwap: float = 0.0
+    vwap_signal: str = "neutral"
+    squeeze_on: bool = False
+    squeeze_momentum: float = 0.0
+    cmf: float = 0.0
+    pivot_support: float = 0.0
+    pivot_resistance: float = 0.0
+    sr_proximity: str = "middle"
+    trend_consistency: float = 0.0
+    candle_strength: str = "neutral"
 
 
 class TechnicalAnalyzer:
@@ -134,6 +145,18 @@ class TechnicalAnalyzer:
         self.df["vortex_neg"] = vortex.vortex_indicator_neg()
 
         self.df["cmf"] = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow()
+
+        mean_20 = close.rolling(window=20).mean()
+        std_20 = close.rolling(window=20).std()
+        self.df["zscore"] = (close - mean_20) / std_20.replace(0, np.nan)
+
+        cum_vol = volume.cumsum()
+        cum_vp = (close * volume).cumsum()
+        self.df["vwap"] = cum_vp / cum_vol.replace(0, np.nan)
+
+        self.df["squeeze_on"] = (self.df["bb_lower"] > self.df["kc_lower"]) & (self.df["bb_upper"] < self.df["kc_upper"])
+        mid = (high.rolling(20).max() + low.rolling(20).min()) / 2
+        self.df["squeeze_mom"] = close - (mid + mean_20) / 2
 
     def detect_regime(self) -> RegimeData:
         row = self.df.iloc[-1]
@@ -290,6 +313,65 @@ class TechnicalAnalyzer:
         support = recent["low"].min()
         resistance = recent["high"].max()
         return support, resistance
+
+    def get_pivot_sr(self, lookback: int = 20) -> tuple[float, float]:
+        recent = self.df.tail(lookback)
+        highs = recent["high"].values
+        lows = recent["low"].values
+        closes = recent["close"].values
+
+        pivot_levels = []
+        for i in range(2, len(highs) - 2):
+            if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                pivot_levels.append(("R", highs[i]))
+            if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                pivot_levels.append(("S", lows[i]))
+
+        current = closes[-1]
+        supports = sorted([p[1] for p in pivot_levels if p[0] == "S" and p[1] < current], reverse=True)
+        resistances = sorted([p[1] for p in pivot_levels if p[0] == "R" and p[1] > current])
+        nearest_s = supports[0] if supports else recent["low"].min()
+        nearest_r = resistances[0] if resistances else recent["high"].max()
+        return nearest_s, nearest_r
+
+    def get_sr_proximity(self) -> str:
+        row = self.df.iloc[-1]
+        close = row["close"]
+        support, resistance = self.get_pivot_sr()
+        if resistance == support:
+            return "middle"
+        position = (close - support) / (resistance - support)
+        if position < 0.2:
+            return "near_support"
+        elif position > 0.8:
+            return "near_resistance"
+        return "middle"
+
+    def get_trend_consistency(self, lookback: int = 10) -> float:
+        changes = self.df["close"].pct_change().tail(lookback).dropna()
+        if len(changes) < 2:
+            return 0.0
+        positive = (changes > 0).sum()
+        return abs(positive / len(changes) - 0.5) * 2.0
+
+    def get_candle_strength(self) -> str:
+        row = self.df.iloc[-1]
+        body = abs(row["close"] - row["open"])
+        total_range = row["high"] - row["low"]
+        if total_range <= 0:
+            return "neutral"
+        body_pct = body / total_range
+        avg_range = (self.df["high"] - self.df["low"]).rolling(20).mean().iloc[-1]
+        if pd.isna(avg_range) or avg_range <= 0:
+            return "neutral"
+        size_ratio = total_range / avg_range
+        if size_ratio >= 2.0 and body_pct >= 0.6:
+            return "strong"
+        elif size_ratio >= 1.5 and body_pct >= 0.5:
+            return "moderate"
+        elif size_ratio < 0.5:
+            return "weak"
+        return "neutral"
 
     def get_obv_trend(self) -> str:
         obv = self.df["obv"].iloc[-1]
@@ -486,6 +568,57 @@ class TechnicalAnalyzer:
             bearish_points += 0.5
             confirmations.append("Williams %R overbought")
 
+        zscore = row.get("zscore", 0) or 0
+        vwap_val = row.get("vwap", 0) or 0
+        squeeze_active = bool(row.get("squeeze_on", False))
+        squeeze_mom = row.get("squeeze_mom", 0) or 0
+
+        current_close = row["close"]
+        vwap_signal = "neutral"
+        if vwap_val > 0:
+            if current_close > vwap_val * 1.005:
+                vwap_signal = "above"
+            elif current_close < vwap_val * 0.995:
+                vwap_signal = "below"
+
+        pivot_s, pivot_r = self.get_pivot_sr()
+        sr_prox = self.get_sr_proximity()
+        trend_cons = self.get_trend_consistency()
+        candle_str = self.get_candle_strength()
+
+        if zscore < -2.0:
+            bullish_points += 1.0
+            confirmations.append(f"Z-score extreme low ({zscore:.2f})")
+        elif zscore > 2.0:
+            bearish_points += 1.0
+            confirmations.append(f"Z-score extreme high ({zscore:.2f})")
+
+        if vwap_signal == "above":
+            bullish_points += 0.5
+            confirmations.append("Price above VWAP")
+        elif vwap_signal == "below":
+            bearish_points += 0.5
+            confirmations.append("Price below VWAP")
+
+        if squeeze_active:
+            confirmations.append("BB squeeze active (breakout imminent)")
+            if squeeze_mom > 0:
+                bullish_points += 0.75
+                confirmations.append("Squeeze momentum bullish")
+            elif squeeze_mom < 0:
+                bearish_points += 0.75
+                confirmations.append("Squeeze momentum bearish")
+
+        if sr_prox == "near_support":
+            bullish_points += 0.5
+            confirmations.append("Near pivot support")
+        elif sr_prox == "near_resistance":
+            bearish_points += 0.5
+            confirmations.append("Near pivot resistance")
+
+        if candle_str == "strong":
+            confirmations.append("Strong candle (2x avg range)")
+
         srsi_k, srsi_d, srsi_sig = self.get_stoch_rsi_signal()
         if srsi_sig == "oversold":
             bullish_points += 0.75
@@ -513,9 +646,6 @@ class TechnicalAnalyzer:
             bearish_points += 0.5
             confirmations.append("Chaikin MF negative (selling pressure)")
 
-        if self._bb_squeeze_active():
-            confirmations.append("BB squeeze active (breakout imminent)")
-
         if vol_trend in ("high", "very_high"):
             net = bullish_points - bearish_points
             if net > 0:
@@ -523,7 +653,7 @@ class TechnicalAnalyzer:
             elif net < 0:
                 bearish_points += 0.5
 
-        total_possible = 14.0
+        total_possible = 18.0
         net = bullish_points - bearish_points
         confidence = min(abs(net) / total_possible, 1.0)
 
@@ -568,4 +698,15 @@ class TechnicalAnalyzer:
             confirmation_score=max(bullish_points, bearish_points),
             required_score=0.0,
             confirmations=confirmations,
+            zscore=round(zscore, 3),
+            vwap=round(vwap_val, 8),
+            vwap_signal=vwap_signal,
+            squeeze_on=squeeze_active,
+            squeeze_momentum=round(squeeze_mom, 8),
+            cmf=round(cmf, 4),
+            pivot_support=round(pivot_s, 8),
+            pivot_resistance=round(pivot_r, 8),
+            sr_proximity=sr_prox,
+            trend_consistency=round(trend_cons, 3),
+            candle_strength=candle_str,
         )

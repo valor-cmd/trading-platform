@@ -27,54 +27,70 @@ class LongTermBot(BaseBot):
         if signal.overall_signal == "hold":
             return False
 
+        if signal.adx < 20:
+            return False
+
         score = 0.0
 
         if signal.ema_trend == "strong_bullish":
-            score += 2.5
+            score += 3.0
         elif signal.ema_trend == "bullish":
-            score += 1.5
+            score += 2.0
         elif signal.ema_trend == "strong_bearish":
-            score += 2.5
+            score += 3.0
         elif signal.ema_trend == "bearish":
-            score += 1.5
+            score += 2.0
 
         sentiment_bias = sentiment.get("bias", "neutral")
         sentiment_weight = sentiment.get("weight", 0)
         if sentiment_bias in ("contrarian_buy", "contrarian_sell"):
-            score += max(sentiment_weight * 3, 1.5)
+            score += max(sentiment_weight * 3, 2.0)
         elif sentiment_bias in ("lean_buy", "lean_sell"):
             score += 1.0
 
         if signal.rsi_signal == "oversold" and signal.overall_signal in ("buy", "strong_buy"):
-            score += 2.0
+            score += 2.5
         elif signal.rsi_signal == "overbought" and signal.overall_signal in ("sell", "strong_sell"):
-            score += 2.0
+            score += 2.5
         elif signal.rsi_signal in ("oversold", "overbought"):
             score += 1.0
 
         if signal.macd_signal in ("bullish_crossover", "bearish_crossover"):
-            score += 1.5
+            score += 2.0
 
-        if signal.adx >= 25:
+        if signal.adx >= 30:
+            score += 1.5
+        elif signal.adx >= 25:
             score += 1.0
 
         if signal.obv_trend in ("bullish", "bearish"):
-            score += 0.75
+            score += 1.0
 
         if signal.psar_direction in ("bullish", "bearish"):
-            score += 0.5
+            if signal.ema_trend and signal.ema_trend.replace("strong_", "") == signal.psar_direction:
+                score += 1.0
 
         if signal.mfi < 20 or signal.mfi > 80:
-            score += 0.75
+            score += 1.0
+
+        if signal.trend_consistency > 0.7:
+            score += 1.5
+        elif signal.trend_consistency > 0.5:
+            score += 0.5
+
+        if signal.cmf > 0.15 and signal.overall_signal in ("buy", "strong_buy"):
+            score += 1.0
+        elif signal.cmf < -0.15 and signal.overall_signal in ("sell", "strong_sell"):
+            score += 1.0
 
         if regime and regime.regime == MarketRegime.RANGING:
-            score -= 1.5
+            score -= 2.0
 
         if regime and regime.regime == MarketRegime.VOLATILE:
             if signal.adx < 25:
-                score -= 0.5
+                score -= 1.0
 
-        return score >= 7.0
+        return score >= 8.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime
@@ -82,21 +98,21 @@ class LongTermBot(BaseBot):
             return True
 
         if trade["side"] == "buy":
-            if signal.ema_trend == "strong_bearish" and signal.rsi > 60 and signal.adx >= 25:
+            if signal.ema_trend == "strong_bearish" and signal.rsi is not None and signal.rsi > 60 and signal.adx >= 25:
                 return True
             if signal.macd_signal == "bearish_crossover" and signal.ema_trend in ("bearish", "strong_bearish"):
                 return True
             if signal.psar_direction == "bearish" and signal.obv_trend == "bearish" and signal.vortex_signal == "bearish":
                 return True
-            if signal.overall_signal == "strong_sell" and signal.confirmation_score >= 6:
+            if signal.overall_signal == "strong_sell" and signal.confirmation_score >= 7:
                 return True
         else:
-            if signal.ema_trend == "strong_bullish" and signal.rsi < 40 and signal.adx >= 25:
+            if signal.ema_trend == "strong_bullish" and signal.rsi is not None and signal.rsi < 40 and signal.adx >= 25:
                 return True
             if signal.macd_signal == "bullish_crossover" and signal.ema_trend in ("bullish", "strong_bullish"):
                 return True
             if signal.psar_direction == "bullish" and signal.obv_trend == "bullish" and signal.vortex_signal == "bullish":
                 return True
-            if signal.overall_signal == "strong_buy" and signal.confirmation_score >= 6:
+            if signal.overall_signal == "strong_buy" and signal.confirmation_score >= 7:
                 return True
         return False

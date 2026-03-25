@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Optional
 
+import pandas as pd
+
 from app.core.store import store, trade_store
 from app.exchange.simulator import PaperExchangeManager
 from app.exchange.registry import exchange_registry
@@ -92,6 +94,26 @@ MIN_PROFIT_BEFORE_EXIT_PCT = {
     "dca": 0.3,
 }
 
+TRAILING_STOP_ATR_MULT = {
+    "scalper": 1.5,
+    "swing": 2.0,
+    "long_term": 2.5,
+    "grid": 1.5,
+    "mean_reversion": 1.5,
+    "momentum": 2.0,
+    "dca": 2.0,
+}
+
+MAX_HOLD_SECONDS = {
+    "scalper": 3600,
+    "swing": 604800,
+    "long_term": 2592000,
+    "grid": 86400,
+    "mean_reversion": 86400,
+    "momentum": 259200,
+    "dca": 2592000,
+}
+
 
 class BaseBot(ABC):
     def __init__(
@@ -113,6 +135,8 @@ class BaseBot(ABC):
         self._account = None
         self._trade_store = None
         self._kv_store = None
+        self._trailing_stops: dict[str, float] = {}
+        self._best_prices: dict[str, float] = {}
 
     @abstractmethod
     def get_timeframes(self) -> list[str]:
@@ -377,21 +401,67 @@ class BaseBot(ABC):
 
                     min_hold = MIN_HOLD_SECONDS.get(self.bot_type.value, 300)
 
+                    order_id = trade["order_id"]
+                    trail_mult = TRAILING_STOP_ATR_MULT.get(self.bot_type.value, 2.0)
+
+                    if order_id not in self._best_prices:
+                        self._best_prices[order_id] = trade["entry_price"]
+                    if trade["side"] == "buy":
+                        if current_price > self._best_prices[order_id]:
+                            self._best_prices[order_id] = current_price
+                    else:
+                        if current_price < self._best_prices[order_id]:
+                            self._best_prices[order_id] = current_price
+
+                    atr_val = 0
+                    try:
+                        atr_val = df.iloc[-1].get("atr", 0) if len(df) > 0 else 0
+                        if pd.isna(atr_val):
+                            atr_val = 0
+                    except Exception:
+                        pass
+
+                    if atr_val > 0 and hold_seconds > MIN_HOLD_SECONDS.get(self.bot_type.value, 300):
+                        best = self._best_prices[order_id]
+                        if trade["side"] == "buy":
+                            new_trail = best - (atr_val * trail_mult)
+                            old_trail = self._trailing_stops.get(order_id, trade["stop_loss"])
+                            self._trailing_stops[order_id] = max(new_trail, old_trail)
+                        else:
+                            new_trail = best + (atr_val * trail_mult)
+                            old_trail = self._trailing_stops.get(order_id, trade["stop_loss"])
+                            self._trailing_stops[order_id] = min(new_trail, old_trail)
+
+                    effective_sl = self._trailing_stops.get(order_id, trade["stop_loss"])
+
                     hit_sl = False
                     hit_tp = False
                     if trade["side"] == "buy":
-                        hit_sl = current_price <= trade["stop_loss"]
+                        hit_sl = current_price <= effective_sl
                         hit_tp = trade.get("take_profit") and current_price >= trade["take_profit"]
                     else:
-                        hit_sl = current_price >= trade["stop_loss"]
+                        hit_sl = current_price >= effective_sl
                         hit_tp = trade.get("take_profit") and current_price <= trade["take_profit"]
 
+                    max_hold = MAX_HOLD_SECONDS.get(self.bot_type.value, 604800)
+
                     if hit_sl:
-                        logger.info(f"{self.bot_type.value} STOP LOSS hit on {symbol}")
+                        trail_info = f" (trailing={effective_sl:.6f})" if order_id in self._trailing_stops else ""
+                        logger.info(f"{self.bot_type.value} STOP LOSS hit on {symbol}{trail_info}")
+                        self._trailing_stops.pop(order_id, None)
+                        self._best_prices.pop(order_id, None)
                         await self.close_trade(exchange_id, trade, "stopped_out")
                         trades_closed += 1
                     elif hit_tp:
                         logger.info(f"{self.bot_type.value} TAKE PROFIT hit on {symbol}")
+                        self._trailing_stops.pop(order_id, None)
+                        self._best_prices.pop(order_id, None)
+                        await self.close_trade(exchange_id, trade, "closed")
+                        trades_closed += 1
+                    elif hold_seconds >= max_hold:
+                        logger.info(f"{self.bot_type.value} MAX HOLD TIME reached on {symbol} ({hold_seconds:.0f}s)")
+                        self._trailing_stops.pop(order_id, None)
+                        self._best_prices.pop(order_id, None)
                         await self.close_trade(exchange_id, trade, "closed")
                         trades_closed += 1
                     elif hold_seconds >= min_hold:
@@ -412,6 +482,8 @@ class BaseBot(ABC):
                         signal2 = analyzer2.analyze()
                         if await self.evaluate_exit(trade, signal2):
                             if move_pct >= min_profit_pct:
+                                self._trailing_stops.pop(order_id, None)
+                                self._best_prices.pop(order_id, None)
                                 await self.close_trade(exchange_id, trade, "closed")
                                 trades_closed += 1
                             else:

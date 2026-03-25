@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from app.bots.base import BaseBot
 from app.exchange.simulator import PaperExchangeManager
@@ -29,21 +28,30 @@ class DCABot(BaseBot):
         if regime and regime.regime == MarketRegime.CHAOTIC:
             return False
 
+        if regime and regime.regime == MarketRegime.STRONG_TREND_DOWN:
+            if signal.adx >= 35:
+                return False
+
         if signal.overall_signal in ("sell", "strong_sell"):
-            return False
+            if signal.ema_trend == "strong_bearish" and signal.adx >= 30:
+                return False
 
         score = 0.0
 
-        if signal.rsi is not None and signal.rsi < 40:
-            score += 2.0
-        if signal.rsi is not None and signal.rsi < 30:
+        if signal.rsi is not None and signal.rsi < 25:
+            score += 3.5
+        elif signal.rsi is not None and signal.rsi < 30:
+            score += 2.5
+        elif signal.rsi is not None and signal.rsi < 40:
             score += 1.5
 
         if signal.bollinger_signal == "oversold":
             score += 2.0
 
         if signal.ema_trend in ("bullish", "strong_bullish"):
-            score += 1.5
+            score += 2.0
+        elif signal.ema_trend == "neutral":
+            score += 0.5
         elif signal.ema_trend == "bearish":
             score -= 0.5
         elif signal.ema_trend == "strong_bearish":
@@ -55,25 +63,40 @@ class DCABot(BaseBot):
         if signal.volume_trend in ("high", "very_high"):
             score += 1.0
 
-        if signal.mfi < 30:
+        if signal.mfi < 20:
+            score += 1.5
+        elif signal.mfi < 30:
             score += 1.0
 
         if signal.obv_trend == "bullish":
+            score += 1.0
+
+        if signal.stoch_rsi_k < 15:
+            score += 1.5
+        elif signal.stoch_rsi_k < 25:
             score += 0.5
 
-        if signal.stoch_rsi_k < 20:
+        if signal.zscore < -2.0:
+            score += 2.0
+        elif signal.zscore < -1.5:
             score += 1.0
+
+        if signal.sr_proximity == "near_support":
+            score += 1.5
+
+        if signal.vwap_signal == "below":
+            score += 0.5
 
         sentiment_bias = sentiment.get("bias", "neutral")
         if sentiment_bias in ("contrarian_buy",):
-            score += 1.5
+            score += 2.0
         elif sentiment_bias in ("lean_buy",):
-            score += 0.5
+            score += 1.0
 
         if regime and regime.regime == MarketRegime.RANGING:
             score += 0.5
 
-        return score >= 4.0
+        return score >= 5.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         entry_price = trade.get("entry_price", 0)
@@ -81,14 +104,16 @@ class DCABot(BaseBot):
             return False
 
         if trade["side"] == "buy":
-            if signal.rsi is not None and signal.rsi > 65:
+            if signal.rsi is not None and signal.rsi > 70:
                 return True
-            if signal.bollinger_signal == "overbought" and signal.rsi is not None and signal.rsi > 55:
+            if signal.rsi is not None and signal.rsi > 65 and signal.macd_signal in ("bearish", "bearish_crossover"):
                 return True
-            if signal.macd_signal == "bearish_crossover" and signal.rsi is not None and signal.rsi > 50:
+            if signal.bollinger_signal == "overbought" and signal.rsi is not None and signal.rsi > 60:
+                return True
+            if signal.ema_trend == "strong_bearish" and signal.adx >= 30 and signal.rsi is not None and signal.rsi > 50:
                 return True
         else:
-            if signal.rsi is not None and signal.rsi < 35:
+            if signal.rsi is not None and signal.rsi < 30:
                 return True
 
         regime = signal.regime
