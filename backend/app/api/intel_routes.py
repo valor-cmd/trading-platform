@@ -3,6 +3,7 @@ from typing import Optional
 
 from app.core.security import require_auth
 from app.services.apify_intel import apify_intel
+from app.services.strategy_intel import strategy_intel
 
 intel_router = APIRouter(prefix="/intel", tags=["intelligence"])
 
@@ -93,3 +94,29 @@ async def get_token_scanner(symbol: str = "BTC", force: bool = False, _auth=Depe
 @intel_router.get("/coinskid/{page}")
 async def get_coinskid(page: str = "ckr_index", force: bool = False, _auth=Depends(require_auth)):
     return await apify_intel.scrape_coinskid(page=page, force=force)
+
+
+@intel_router.get("/strategy/advice")
+async def get_strategy_advice(symbol: str, bot_type: str = "scalper", _auth=Depends(require_auth)):
+    advice = strategy_intel.get_advice(bot_type, symbol)
+    return {
+        "bot_type": advice.bot_type,
+        "symbol": advice.symbol,
+        "confidence_boost": advice.confidence_boost,
+        "direction_bias": advice.direction_bias,
+        "coinskid_zone": advice.coinskid_zone,
+        "grid_bounds": advice.grid_bounds,
+        "strategy_notes": advice.strategy_notes,
+        "should_trade": advice.should_trade,
+        "optimal_params": advice.optimal_params,
+    }
+
+
+@intel_router.get("/strategy/params")
+async def get_strategy_params(_auth=Depends(require_auth)):
+    return strategy_intel.get_all_optimal_params()
+
+
+@intel_router.get("/strategy/bot-report")
+async def get_strategy_bot_report(_auth=Depends(require_auth)):
+    return strategy_intel.get_bot_report()

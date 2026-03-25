@@ -351,6 +351,22 @@ class BaseBot(ABC):
                 except Exception:
                     pass
 
+                strategy_advice = None
+                try:
+                    from app.services.strategy_intel import strategy_intel
+                    signal_data = {
+                        "side": self._determine_side(signal),
+                        "bb_upper": getattr(signal, "bb_upper", 0) or 0,
+                        "bb_lower": getattr(signal, "bb_lower", 0) or 0,
+                        "price": df.iloc[-1]["close"] if len(df) > 0 else 0,
+                        "atr": signal.atr or 0,
+                        "adx": signal.adx or 0,
+                    }
+                    strategy_advice = strategy_intel.get_advice(self.bot_type.value, symbol, signal_data)
+                    signal.confidence = min(1.0, max(0.0, signal.confidence + strategy_advice.confidence_boost))
+                except Exception:
+                    pass
+
                 has_open = any(t["symbol"] == symbol for t in self.active_trades)
                 if not has_open and can_open:
                     if signal.confidence < min_conf:

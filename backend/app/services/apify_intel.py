@@ -496,6 +496,24 @@ class ApifyIntelligence:
             else:
                 results[name] = {"ok": True, "items_count": len(result.get("items", result.get("events", result.get("data", []))))}
         results["signal_summary"] = self.get_signal_summary()
+
+        try:
+            from app.services.strategy_intel import strategy_intel
+            ckr_result = results.get("coinskid_ckr", {})
+            if ckr_result.get("ok"):
+                ckr_data = self._cache.get("coinskid_ckr_index", {}).get("data", {})
+                strategy_intel.update_coinskid_ckr(ckr_data)
+            heatmap_result = results.get("coinskid_heatmap", {})
+            if heatmap_result.get("ok"):
+                heatmap_data = self._cache.get("coinskid_heatmap", {}).get("data", {})
+                strategy_intel.update_coinskid_zones(heatmap_data)
+            blocks_result = results.get("coinskid_blocks", {})
+            if blocks_result.get("ok"):
+                blocks_data = self._cache.get("coinskid_crypto_blocks", {}).get("data", {})
+                strategy_intel.update_coinskid_bottom_checklist(blocks_data)
+        except Exception as e:
+            logger.debug(f"Strategy intel update from coinskid failed: {e}")
+
         return results
 
     def get_bot_signal_boost(self, symbol: str, bot_type: str) -> dict:
