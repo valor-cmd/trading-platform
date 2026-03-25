@@ -137,6 +137,51 @@ class BaseBot(ABC):
         self._kv_store = None
         self._trailing_stops: dict[str, float] = {}
         self._best_prices: dict[str, float] = {}
+        self._consecutive_errors = 0
+
+    async def resume_open_trades(self):
+        ts = self._get_trade_store()
+        kv = self._get_kv_store()
+        open_trades = ts.get_open_trades()
+        resumed = 0
+        for ot in open_trades:
+            if ot.get("bot_type") != self.bot_type.value:
+                continue
+            order_id = ot.get("id", f"resumed_{ot.get('symbol', 'UNK')}_{ot.get('entry_price', 0)}")
+            trade = {
+                "order_id": str(order_id),
+                "symbol": ot.get("symbol", ""),
+                "side": ot.get("side", "buy"),
+                "entry_price": ot.get("entry_price", 0),
+                "amount": ot.get("quantity", 0),
+                "position_usd": ot.get("entry_price", 0) * ot.get("quantity", 0),
+                "stop_loss": ot.get("stop_loss_price", 0),
+                "take_profit": ot.get("take_profit_price", 0),
+                "fee_rate": 0.001,
+                "entry_fee_usd": ot.get("entry_fee_usd", 0),
+                "slippage_usd": ot.get("slippage_usd", 0),
+                "spread_pct": ot.get("spread_pct", 0),
+                "opened_at": ot.get("opened_at", ""),
+                "reasoning": ot.get("reasoning", "resumed after restart"),
+                "signal_confidence": 0,
+                "bot_type": self.bot_type.value,
+                "regime": ot.get("regime", "unknown"),
+                "strategy": ot.get("strategy", ""),
+                "signal_score": ot.get("signal_score", 0),
+                "confirmations": [],
+            }
+            already = any(t.get("symbol") == trade["symbol"] and t.get("side") == trade["side"] for t in self.active_trades)
+            if not already:
+                self.active_trades.append(trade)
+                await kv.hset(
+                    f"active_trades:{self.bot_type.value}",
+                    str(order_id),
+                    json.dumps(trade, default=str),
+                )
+                resumed += 1
+        if resumed > 0:
+            logger.info(f"{self.bot_type.value} resumed {resumed} open trades from trade store")
+        return resumed
 
     @abstractmethod
     def get_timeframes(self) -> list[str]:
@@ -630,6 +675,10 @@ class BaseBot(ABC):
         self.running = True
         self._consecutive_errors = 0
         self._cycle_count = 0
+        try:
+            await self.resume_open_trades()
+        except Exception as e:
+            logger.warning(f"{self.bot_type.value} failed to resume trades: {e}")
         logger.info(f"{self.bot_type.value} bot STARTED (interval={interval_seconds}s, symbols={len(self.get_symbols())})")
         while self.running:
             try:
