@@ -72,7 +72,10 @@ class PaperExchangeManager:
         return live_prices.get_symbols(exchange_id)
 
     async def fetch_ohlcv(self, exchange_id: str, symbol: str, timeframe: str = "1h", limit: int = 200) -> pd.DataFrame:
-        ex = self._resolve_exchange(symbol)
+        if exchange_id and symbol in live_prices.get_symbols(exchange_id):
+            ex = exchange_id
+        else:
+            ex = self._resolve_exchange(symbol)
         return await live_prices.fetch_ohlcv(ex, symbol, timeframe, limit)
 
     async def fetch_ticker(self, exchange_id: str, symbol: str) -> dict:

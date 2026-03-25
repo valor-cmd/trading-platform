@@ -70,7 +70,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "⚡",
     description: "Scalps trending regimes (ADX>25) using RSI extremes + MACD crossovers with PSAR + Vortex confirmation. Blocks trades in chaotic markets. Requires 3+ confirmations and regime-adjusted score of 4.0+. Uses StochRSI and MFI for precision entries.",
     indicators: ["ADX regime filter", "RSI(14)", "MACD crossover", "PSAR direction", "Vortex(14)", "StochRSI", "MFI(14)", "BB squeeze"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "15m", initial_capital: 1000, risk_per_trade_pct: 1.5, limit: 500, sl_atr_multiplier: 1.2, tp_rr_ratio: 2.5, min_confidence: 0.12, min_confirmations: 2 },
+    params: { exchange_id: "kucoin", symbol: "BTC/USDT", timeframe: "15m", initial_capital: 100, risk_per_trade_pct: 1.5, limit: 500, sl_atr_multiplier: 1.2, tp_rr_ratio: 2.5, min_confidence: 0.12, min_confirmations: 2 },
   },
   {
     id: "scalper_mean_reversion",
@@ -80,7 +80,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "🎯",
     description: "Detects Bollinger/Keltner squeeze (BB inside KC) for imminent breakouts. Enters on squeeze release with OBV volume confirmation and Williams %R extremes. Only trades in ranging regimes where mean reversion has highest probability.",
     indicators: ["BB/KC squeeze detect", "Williams %R", "OBV trend", "Keltner Channel", "RSI(14)", "CMF(20)", "Volume spike"],
-    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "15m", initial_capital: 1000, risk_per_trade_pct: 1.5, limit: 500, sl_atr_multiplier: 1.3, tp_rr_ratio: 2.0, min_confidence: 0.10, min_confirmations: 2 },
+    params: { exchange_id: "kucoin", symbol: "ETH/USDT", timeframe: "15m", initial_capital: 100, risk_per_trade_pct: 1.5, limit: 500, sl_atr_multiplier: 1.3, tp_rr_ratio: 2.0, min_confidence: 0.10, min_confirmations: 2 },
   },
   {
     id: "swing_trend",
@@ -90,7 +90,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "〰",
     description: "Rides confirmed trends by requiring ADX>25 + EMA(9/21/50) alignment + PSAR direction agreement. Sentiment-weighted via Fear & Greed contrarian filter. Blocks ranging/chaotic regimes. Exits on triple bearish confirmation (PSAR + OBV + Vortex reversal).",
     indicators: ["ADX trend strength", "EMA(9,21,50)", "PSAR(0.02)", "OBV + EMA", "Vortex(14)", "Fear & Greed", "MACD crossover", "MFI(14)"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.5, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
+    params: { exchange_id: "kucoin", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 100, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.5, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
   },
   {
     id: "swing_breakout",
@@ -100,7 +100,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "📊",
     description: "Waits for 3+ directional confirmations: EMA alignment + MACD + PSAR + OBV all agreeing on direction. ADX must show trend (>20). Rejects contradictory signals (e.g. bullish entry with strong bearish EMA + ADX). Regime-adaptive scoring.",
     indicators: ["ADX(14) > 20", "EMA stack", "PSAR + MACD agree", "OBV accumulation", "Keltner breakout", "Volume confirm", "Contradiction filter"],
-    params: { exchange_id: "binance", symbol: "SOL/USDT", timeframe: "4h", initial_capital: 2000, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.8, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
+    params: { exchange_id: "kucoin", symbol: "SOL/USDT", timeframe: "4h", initial_capital: 100, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.8, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
   },
   {
     id: "long_term_macro",
@@ -110,7 +110,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "📈",
     description: "Long-term accumulation weighted by market regime + sentiment. Buys aggressively during Extreme Fear in trending-up regimes. Requires ADX trend confirmation + weekly EMA(50/200) cross. MFI and OBV confirm institutional accumulation. Blocks chaotic/ranging markets.",
     indicators: ["Market Regime", "Fear & Greed (3x weight)", "ADX trend", "EMA(50,200)", "MFI institutional", "OBV accumulation", "PSAR weekly", "RSI extremes"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1d", initial_capital: 5000, risk_per_trade_pct: 1.5, limit: 365, sl_atr_multiplier: 2.0, tp_rr_ratio: 3.0, min_confidence: 0.10, min_confirmations: 2 },
+    params: { exchange_id: "kucoin", symbol: "BTC/USDT", timeframe: "1d", initial_capital: 100, risk_per_trade_pct: 1.5, limit: 365, sl_atr_multiplier: 2.0, tp_rr_ratio: 3.0, min_confidence: 0.10, min_confirmations: 2 },
   },
   {
     id: "grid_range",
@@ -118,9 +118,9 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     botType: "Grid Bot Strat",
     color: "#ff9f1c",
     icon: "⊞",
-    description: "Only activates in RANGING regime (ADX<20, low BB width). Places grid between Bollinger Bands with Keltner Channel confirmation. Uses RSI + StochRSI for entry timing within the range. Automatically pauses when regime shifts to trending or volatile.",
+    description: "Grid strategy for RANGING regimes (ADX<20). Inspired by 3Commas grid bots: places arithmetic grid between Bollinger Bands as upper/lower bounds. Buys at lower grid levels, sells at upper. Uses RSI + StochRSI for entry timing. Pauses on regime shift to trending/volatile.",
     indicators: ["Regime: ranging only", "ADX < 20 filter", "BB range bounds", "Keltner Channel", "RSI mean reversion", "StochRSI timing", "BB width percentile"],
-    params: { exchange_id: "binance", symbol: "ETH/USDT", timeframe: "1h", initial_capital: 2000, risk_per_trade_pct: 1, limit: 500, sl_atr_multiplier: 1.0, tp_rr_ratio: 1.5, min_confidence: 0.10, min_confirmations: 2 },
+    params: { exchange_id: "kucoin", symbol: "ETH/USDT", timeframe: "1h", initial_capital: 100, risk_per_trade_pct: 1, limit: 500, sl_atr_multiplier: 1.0, tp_rr_ratio: 1.5, min_confidence: 0.10, min_confirmations: 2 },
   },
   {
     id: "multi_factor",
@@ -130,7 +130,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "◈",
     description: "Highest conviction trades only. Requires 6+ factors aligned: RSI zone + MACD crossover + EMA alignment + ADX trend + PSAR direction + OBV/MFI volume confirmation + sentiment. Minimum score 5.0/14 with 3+ confirmations. Contradiction detection blocks conflicting setups.",
     indicators: ["RSI + StochRSI", "MACD + signal", "EMA(9,21,50) stack", "ADX(14) + DI", "PSAR + Vortex", "OBV + MFI + CMF", "Sentiment bias", "Contradiction filter"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 3000, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.5, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
+    params: { exchange_id: "kucoin", symbol: "BTC/USDT", timeframe: "1h", initial_capital: 100, risk_per_trade_pct: 2, limit: 500, sl_atr_multiplier: 1.5, tp_rr_ratio: 2.5, min_confidence: 0.15, min_confirmations: 3 },
   },
   {
     id: "arb_cross_exchange",
@@ -140,7 +140,7 @@ const STRATEGY_PRESETS: StrategyPreset[] = [
     icon: "⇄",
     description: "Scans price differentials across 9+ CEXs and DEXs simultaneously. Executes when spread exceeds 0.3% after fees. Simultaneous buy on cheaper exchange and sell on expensive one. Max 5% capital per trade, 3 concurrent positions.",
     indicators: ["Price spread > 0.3%", "Fee calculation", "Liquidity check", "Slippage estimate"],
-    params: { exchange_id: "binance", symbol: "BTC/USDT", timeframe: "5m", initial_capital: 5000, risk_per_trade_pct: 3, limit: 500, sl_atr_multiplier: 1.0, tp_rr_ratio: 1.5, min_confidence: 0.10, min_confirmations: 2 },
+    params: { exchange_id: "kucoin", symbol: "BTC/USDT", timeframe: "5m", initial_capital: 100, risk_per_trade_pct: 3, limit: 500, sl_atr_multiplier: 1.0, tp_rr_ratio: 1.5, min_confidence: 0.10, min_confirmations: 2 },
   },
 ];
 
@@ -163,10 +163,10 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { valu
 
 function Backtest() {
   const [form, setForm] = useState({
-    exchange_id: "binance",
+    exchange_id: "kucoin",
     symbol: "BTC/USDT",
     timeframe: "1h",
-    initial_capital: 1000,
+    initial_capital: 100,
     risk_per_trade_pct: 2,
     limit: 500,
     sl_atr_multiplier: 1.5,
@@ -174,6 +174,7 @@ function Backtest() {
     min_confidence: 0.15,
     min_confirmations: 3,
   });
+  const [symbolLoadKey, setSymbolLoadKey] = useState(0);
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -194,22 +195,20 @@ function Backtest() {
   useEffect(() => {
     if (!form.exchange_id) return;
     setLoadingSymbols(true);
+    setSymbols([]);
     getExchangePairs(form.exchange_id, "", 5000).then((res) => {
       const pairs: string[] = res.data?.pairs ?? [];
       setSymbols(pairs);
-      if (pairs.length > 0 && !pairs.includes(form.symbol)) {
-        const usdt = pairs.find((p) => p.includes("/USDT") || p.includes("/USD"));
-        if (usdt) setForm((f) => ({ ...f, symbol: usdt }));
-      }
     }).catch(() => setSymbols([]))
       .finally(() => setLoadingSymbols(false));
-  }, [form.exchange_id]);
+  }, [form.exchange_id, symbolLoadKey]);
 
   const handlePresetSelect = (preset: StrategyPreset) => {
     setActivePreset(preset.id);
     setForm(preset.params);
     setResult(null);
     setError(null);
+    setSymbolLoadKey((k) => k + 1);
   };
 
   const handleRun = async () => {

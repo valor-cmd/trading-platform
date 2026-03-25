@@ -103,7 +103,7 @@ export const getExchangesStatus = () => api.get("/exchanges/status");
 
 export const getExchangesPairs = () => api.get("/exchanges/pairs");
 
-export const getExchangePairs = (exchangeId: string, q = "", limit = 200, offset = 0) =>
+export const getExchangePairs = (exchangeId: string, q = "", limit = 5000, offset = 0) =>
   api.get(`/exchanges/${exchangeId}/pairs`, { params: { q, limit, offset } });
 
 export const getArbOpportunities = (minProfit = 0, limit = 50) =>
