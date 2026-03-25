@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import {
   getAccountingSummary, getPnlByBot, recordDeposit, recordWithdrawal,
-  getActiveTradesLive, getFees, getLiveBalance, getLedger,
+  getActiveTradesLive, getFees, getLiveBalance, getLedger, closeTrade,
 } from "../services/api";
 
 interface PnlDay { date: string; pnl_usd: number }
@@ -76,7 +76,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   return null;
 };
 
-function Accounting() {
+function Accounting({ activeAccount = "default" }: { activeAccount?: string }) {
   const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
   const [byBot, setByBot] = useState<Record<string, { pnl_usd: number; trades: number }>>({});
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
@@ -94,12 +94,12 @@ function Accounting() {
   const load = async () => {
     try {
       const [s, b, l, at, f, lb] = await Promise.allSettled([
-        getAccountingSummary(),
-        getPnlByBot(),
-        getLedger(),
-        getActiveTradesLive(),
-        getFees(),
-        getLiveBalance(),
+        getAccountingSummary(activeAccount),
+        getPnlByBot(activeAccount),
+        getLedger(activeAccount),
+        getActiveTradesLive(activeAccount),
+        getFees(activeAccount),
+        getLiveBalance(activeAccount),
       ]);
       if (s.status === "fulfilled") setSummary(s.value.data);
       if (b.status === "fulfilled") setByBot(b.value.data);
@@ -116,7 +116,7 @@ function Accounting() {
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeAccount]);
 
   const s = (summary as { summary?: Record<string, number> })?.summary;
   const wr = (summary as { win_rate?: Record<string, number> })?.win_rate;
@@ -491,6 +491,31 @@ function Accounting() {
                       <span className="text-secondary">
                         Opened: {t.opened_at ? new Date(t.opened_at).toLocaleString() : "—"}
                       </span>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Close ${t.symbol} ${t.side} position at market?`)) return;
+                          try {
+                            const res = await closeTrade(t.id, activeAccount);
+                            const d = res.data;
+                            alert(`Closed ${d.symbol} @ $${d.exit_price?.toFixed(4)} | PnL: $${d.pnl_usd?.toFixed(4)}`);
+                            setActiveTrades((prev) => prev.filter((tr) => tr.id !== t.id));
+                          } catch (e: any) {
+                            alert(e?.response?.data?.detail || "Failed to close trade");
+                          }
+                        }}
+                        style={{
+                          padding: "0.3rem 0.7rem",
+                          fontSize: "0.7rem",
+                          fontWeight: 700,
+                          background: "var(--red-dim)",
+                          color: "var(--red)",
+                          border: "1px solid var(--red)",
+                          borderRadius: "var(--radius-full)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        CLOSE
+                      </button>
                     </div>
                   </div>
                 );

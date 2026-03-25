@@ -121,7 +121,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard activeAccount={activeAccount} setActiveAccount={setActiveAccount} accounts={accounts} reloadAccounts={() => getAccounts().then(r => setAccounts(r.data || [])).catch(() => {})} />} />
           <Route path="/bots" element={<Bots activeAccount={activeAccount} setActiveAccount={setActiveAccount} accounts={accounts} />} />
-          <Route path="/accounting" element={<Accounting />} />
+          <Route path="/accounting" element={<Accounting activeAccount={activeAccount} />} />
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/intel" element={<Intelligence />} />
           <Route path="/hummingbot" element={<Hummingbot />} />
