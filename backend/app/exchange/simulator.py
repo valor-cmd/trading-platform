@@ -114,7 +114,7 @@ class PaperExchangeManager:
         ask = ticker.get("ask") or price
         spread = (ask - bid) / price if price > 0 else 0
 
-        additional_slip = random.uniform(0.0002, 0.0008)
+        additional_slip = random.uniform(0.0001, 0.0003)
         if side == "buy":
             fill_price = ask if ask > 0 else price
             fill_price *= (1 + additional_slip)

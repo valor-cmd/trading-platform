@@ -92,18 +92,18 @@ class MeanReversionBot(BaseBot):
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         if trade["side"] == "buy":
-            if signal.rsi is not None and signal.rsi > 55:
+            if signal.rsi is not None and signal.rsi > 65:
                 return True
-            if signal.bollinger_signal == "overbought":
+            if signal.bollinger_signal == "overbought" and signal.rsi is not None and signal.rsi > 55:
+                return True
+            if signal.macd_signal in ("bearish", "bearish_crossover") and signal.rsi is not None and signal.rsi > 50:
                 return True
         else:
-            if signal.rsi is not None and signal.rsi < 45:
+            if signal.rsi is not None and signal.rsi < 35:
                 return True
-            if signal.bollinger_signal == "oversold":
+            if signal.bollinger_signal == "oversold" and signal.rsi is not None and signal.rsi < 45:
                 return True
-
-        if signal.rsi is not None and 45 <= signal.rsi <= 55:
-            if signal.bollinger_signal not in ("oversold", "overbought"):
+            if signal.macd_signal in ("bullish", "bullish_crossover") and signal.rsi is not None and signal.rsi < 50:
                 return True
 
         return False

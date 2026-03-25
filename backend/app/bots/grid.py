@@ -34,6 +34,9 @@ class GridBot(BaseBot):
         if signal.bb_width <= 0:
             return False
 
+        if signal.atr <= 0:
+            return False
+
         score = 0.0
 
         if regime.regime == MarketRegime.RANGING:
@@ -73,12 +76,13 @@ class GridBot(BaseBot):
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime
         if regime and regime.regime in (MarketRegime.STRONG_TREND_UP, MarketRegime.STRONG_TREND_DOWN):
-            return True
+            if signal.adx >= 35:
+                return True
 
         if regime and regime.regime == MarketRegime.CHAOTIC:
             return True
 
-        if signal.adx >= 35:
+        if signal.adx >= 40:
             return True
 
         return False

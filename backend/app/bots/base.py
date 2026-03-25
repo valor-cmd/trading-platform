@@ -72,6 +72,26 @@ MIN_CONFIDENCE = {
 }
 MIN_POSITION_USD = 1.0
 
+MIN_HOLD_SECONDS = {
+    "scalper": 120,
+    "swing": 3600,
+    "long_term": 14400,
+    "grid": 300,
+    "mean_reversion": 600,
+    "momentum": 300,
+    "dca": 1800,
+}
+
+MIN_PROFIT_BEFORE_EXIT_PCT = {
+    "scalper": 0.3,
+    "swing": 0.5,
+    "long_term": 1.0,
+    "grid": 0.2,
+    "mean_reversion": 0.5,
+    "momentum": 0.4,
+    "dca": 0.3,
+}
+
 
 class BaseBot(ABC):
     def __init__(
@@ -345,6 +365,18 @@ class BaseBot(ABC):
                     ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
                     current_price = ticker["last"]
 
+                    opened_at = trade.get("opened_at", "")
+                    hold_seconds = 0
+                    if opened_at:
+                        try:
+                            from datetime import datetime as _dt
+                            ot = _dt.fromisoformat(opened_at.replace("Z", "+00:00"))
+                            hold_seconds = (datetime.now(timezone.utc) - ot).total_seconds()
+                        except Exception:
+                            hold_seconds = 9999
+
+                    min_hold = MIN_HOLD_SECONDS.get(self.bot_type.value, 300)
+
                     hit_sl = False
                     hit_tp = False
                     if trade["side"] == "buy":
@@ -362,13 +394,30 @@ class BaseBot(ABC):
                         logger.info(f"{self.bot_type.value} TAKE PROFIT hit on {symbol}")
                         await self.close_trade(exchange_id, trade, "closed")
                         trades_closed += 1
-                    else:
+                    elif hold_seconds >= min_hold:
+                        entry_p = trade["entry_price"]
+                        if entry_p > 0:
+                            if trade["side"] == "buy":
+                                move_pct = (current_price - entry_p) / entry_p * 100
+                            else:
+                                move_pct = (entry_p - current_price) / entry_p * 100
+                            fee_cost_pct = trade.get("fee_rate", 0.001) * 2 * 100
+                            min_profit_pct = max(fee_cost_pct + MIN_PROFIT_BEFORE_EXIT_PCT.get(self.bot_type.value, 0.3), 0.3)
+                        else:
+                            move_pct = 0
+                            min_profit_pct = 0.3
+
                         df2 = await self.exchange.fetch_ohlcv(exchange_id, symbol, tf)
                         analyzer2 = TechnicalAnalyzer(df2)
                         signal2 = analyzer2.analyze()
                         if await self.evaluate_exit(trade, signal2):
-                            await self.close_trade(exchange_id, trade, "closed")
-                            trades_closed += 1
+                            if move_pct >= min_profit_pct:
+                                await self.close_trade(exchange_id, trade, "closed")
+                                trades_closed += 1
+                            else:
+                                self._last_scan_results[symbol] = (
+                                    f"exit signal but move {move_pct:+.2f}% < min {min_profit_pct:.2f}% (hold {hold_seconds:.0f}s)"
+                                )
 
             except Exception as e:
                 logger.debug(f"{self.bot_type.value} error on {symbol}: {e}")
