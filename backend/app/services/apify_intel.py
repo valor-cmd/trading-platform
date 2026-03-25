@@ -285,28 +285,88 @@ class ApifyIntelligence:
         title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE)
         if title_match:
             data["title"] = title_match.group(1)
-        numbers = re.findall(r'(?:rating|ckr|index|score|value)["\s:=]+(\d+(?:\.\d+)?)', html, re.IGNORECASE)
-        if numbers:
-            data["extracted_values"] = [float(n) for n in numbers[:10]]
-        btc_blocks = re.findall(r'(?:btc|bitcoin)["\s:=]*(\d+(?:\.\d+)?)', html, re.IGNORECASE)
-        if btc_blocks:
-            data["btc_values"] = [float(n) for n in btc_blocks[:10]]
-        usd_blocks = re.findall(r'(?:usd|dollar)["\s:=]*(\d+(?:\.\d+)?)', html, re.IGNORECASE)
-        if usd_blocks:
-            data["usd_values"] = [float(n) for n in usd_blocks[:10]]
+        macro_match = re.search(r'MACRO\s+(BEARISH|BULLISH|NEUTRAL)', html, re.IGNORECASE)
+        if macro_match:
+            data["macro_status"] = macro_match.group(1).lower()
+        btc_price = re.search(r'\$([\d,]+(?:\.\d+)?)', html)
+        if btc_price:
+            data["btc_price"] = float(btc_price.group(1).replace(',', ''))
         buy_signals = len(re.findall(r'(?:buy|bullish|long)', html, re.IGNORECASE))
         sell_signals = len(re.findall(r'(?:sell|bearish|short)', html, re.IGNORECASE))
         data["buy_mentions"] = buy_signals
         data["sell_mentions"] = sell_signals
         if buy_signals + sell_signals > 0:
             data["sentiment_ratio"] = round(buy_signals / (buy_signals + sell_signals), 3)
-        fear_matches = re.findall(r'(?:fear|greed)["\s:=]*(\d+)', html, re.IGNORECASE)
-        if fear_matches:
-            data["fear_greed_values"] = [int(n) for n in fear_matches[:5]]
         script_data = re.findall(r'(?:var|let|const)\s+\w+\s*=\s*(\[.*?\]);', html, re.DOTALL)
         if script_data:
             data["embedded_arrays"] = len(script_data)
         return data
+
+    async def fetch_fear_greed_index(self, force: bool = False) -> dict:
+        key = "fear_greed_index"
+        if not force and self._is_cached(key):
+            return self._cache[key]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.alternative.me/fng/?limit=30&format=json",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        raw = await resp.json()
+                        entries = raw.get("data", [])
+                        if not entries:
+                            return {"error": "no data"}
+                        today = entries[0]
+                        val = int(today["value"])
+                        classification = today["value_classification"]
+                        avg_7d = sum(int(e["value"]) for e in entries[:7]) / min(7, len(entries))
+                        avg_30d = sum(int(e["value"]) for e in entries[:30]) / min(30, len(entries))
+                        zone = self._fng_to_zone(val)
+                        result = {
+                            "value": val,
+                            "classification": classification,
+                            "zone": zone,
+                            "avg_7d": round(avg_7d, 1),
+                            "avg_30d": round(avg_30d, 1),
+                            "trend": "improving" if val > avg_7d else "worsening",
+                            "history": [
+                                {"value": int(e["value"]), "classification": e["value_classification"]}
+                                for e in entries[:7]
+                            ],
+                            "fetched_at": time.time(),
+                            "source": "alternative.me",
+                        }
+                        self._set_cache(key, result)
+                        self._signals.append(SignalEntry(
+                            source="fear_greed_index",
+                            signal_type="macro_sentiment",
+                            symbol="MARKET",
+                            direction="bullish" if zone in ("extreme_fear", "fearful") else ("bearish" if zone in ("greed", "extreme_greed") else "neutral"),
+                            confidence=0.6,
+                            detail=f"Fear & Greed: {val} ({classification}), 7d avg: {avg_7d:.0f}",
+                            timestamp=time.time(),
+                        ))
+                        return result
+                    return {"error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @staticmethod
+    def _fng_to_zone(val: int) -> str:
+        if val <= 10:
+            return "extreme_fear"
+        elif val <= 25:
+            return "fearful"
+        elif val <= 40:
+            return "worry"
+        elif val <= 60:
+            return "neutral"
+        elif val <= 75:
+            return "optimism"
+        elif val <= 90:
+            return "greed"
+        return "extreme_greed"
 
     def _extract_news_signals(self, items: list):
         if not isinstance(items, list):
@@ -484,7 +544,7 @@ class ApifyIntelligence:
             "twitter_stream": self.get_twitter_stream_snapshot(force=True),
             "coinskid_ckr": self.scrape_coinskid("ckr_index", force=True),
             "coinskid_heatmap": self.scrape_coinskid("heatmap", force=True),
-            "coinskid_blocks": self.scrape_coinskid("crypto_blocks", force=True),
+            "fear_greed_index": self.fetch_fear_greed_index(force=True),
         }
         gathered = await asyncio.gather(
             *[asyncio.ensure_future(t) for t in tasks.values()],
@@ -499,20 +559,35 @@ class ApifyIntelligence:
 
         try:
             from app.services.strategy_intel import strategy_intel
-            ckr_result = results.get("coinskid_ckr", {})
-            if ckr_result.get("ok"):
-                ckr_data = self._cache.get("coinskid_ckr_index", {}).get("data", {})
-                strategy_intel.update_coinskid_ckr(ckr_data)
-            heatmap_result = results.get("coinskid_heatmap", {})
-            if heatmap_result.get("ok"):
-                heatmap_data = self._cache.get("coinskid_heatmap", {}).get("data", {})
-                strategy_intel.update_coinskid_zones(heatmap_data)
-            blocks_result = results.get("coinskid_blocks", {})
-            if blocks_result.get("ok"):
-                blocks_data = self._cache.get("coinskid_crypto_blocks", {}).get("data", {})
-                strategy_intel.update_coinskid_bottom_checklist(blocks_data)
+            fng = self._cache.get("fear_greed_index", {})
+            if fng and fng.get("zone"):
+                zone_map = {}
+                zone_name = fng["zone"]
+                zone_map["bitcoin"] = zone_name.replace("_", " ").title() + " zone"
+                zone_map["ethereum"] = zone_name.replace("_", " ").title() + " zone"
+                zone_map["market"] = zone_name.replace("_", " ").title() + " zone"
+                strategy_intel.update_coinskid_zones(zone_map)
+
+            ckr_data = self._cache.get("coinskid_ckr_index", {}).get("data", {})
+            if ckr_data:
+                enriched = dict(ckr_data)
+                if fng and fng.get("value") is not None:
+                    enriched["extracted_values"] = [fng["value"]]
+                enriched["buy_mentions"] = ckr_data.get("buy_mentions", 0)
+                enriched["sell_mentions"] = ckr_data.get("sell_mentions", 0)
+                strategy_intel.update_coinskid_ckr(enriched)
+            elif fng and fng.get("value") is not None:
+                strategy_intel.update_coinskid_ckr({
+                    "extracted_values": [fng["value"]],
+                    "buy_mentions": 0,
+                    "sell_mentions": 0,
+                })
+
+            heatmap_data = self._cache.get("coinskid_heatmap", {}).get("data", {})
+            if heatmap_data:
+                strategy_intel.update_coinskid_bottom_checklist(heatmap_data)
         except Exception as e:
-            logger.debug(f"Strategy intel update from coinskid failed: {e}")
+            logger.debug(f"Strategy intel update failed: {e}")
 
         return results
 

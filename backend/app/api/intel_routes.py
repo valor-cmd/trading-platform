@@ -96,6 +96,11 @@ async def get_coinskid(page: str = "ckr_index", force: bool = False, _auth=Depen
     return await apify_intel.scrape_coinskid(page=page, force=force)
 
 
+@intel_router.get("/fear-greed")
+async def get_fear_greed(force: bool = False, _auth=Depends(require_auth)):
+    return await apify_intel.fetch_fear_greed_index(force=force)
+
+
 @intel_router.get("/strategy/advice")
 async def get_strategy_advice(symbol: str, bot_type: str = "scalper", _auth=Depends(require_auth)):
     advice = strategy_intel.get_advice(bot_type, symbol)
