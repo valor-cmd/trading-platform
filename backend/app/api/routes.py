@@ -90,7 +90,11 @@ def _calc_open_position_value_sync(open_trades: list[dict], prices: dict[str, fl
         sym = t.get("symbol", "")
         qty = t.get("quantity", 0)
         price = prices.get(sym, 0) or t.get("entry_price", 0)
-        value += price * qty
+        side = t.get("side", "buy")
+        if side == "buy":
+            value += price * qty
+        else:
+            value -= price * qty
     return value
 
 
@@ -110,7 +114,11 @@ def _fast_live_balance(pe=None, ts=None) -> float:
         sym = t.get("symbol", "")
         qty = t.get("quantity", 0)
         price = cached_prices.get(sym) or entry_prices.get(sym) or t.get("entry_price", 0)
-        pos_value += price * qty
+        side = t.get("side", "buy")
+        if side == "buy":
+            pos_value += price * qty
+        else:
+            pos_value -= price * qty
     return round(usdt + pos_value, 5)
 
 router = APIRouter()
@@ -365,7 +373,7 @@ def get_accounting_summary(account: str = "default"):
     data["summary"]["account_value_usd"] = round(live_total, 5)
     data["summary"]["net_pnl_usd"] = round(live_pnl, 5)
     data["summary"]["cash_balance_usd"] = round(usdt, 5)
-    data["summary"]["open_position_value_usd"] = round(max(open_pos_value, 0), 5)
+    data["summary"]["open_position_value_usd"] = round(open_pos_value, 5)
     data["summary"]["daily_target_pct"] = acct.config.daily_target_pct
     data["summary"]["target_hit"] = acct._target_hit
     data["summary"]["auto_stop_on_target"] = acct.config.auto_stop_on_target
@@ -423,12 +431,13 @@ def get_active_trades_live(account: str = "default"):
         entry_price = t.get("entry_price", 0)
         quantity = t.get("quantity", 0)
         side = t.get("side", "buy")
-        position_value = current_price * quantity
         entry_value = entry_price * quantity
         if side == "buy":
+            position_value = current_price * quantity
             unrealized_pnl = (current_price - entry_price) * quantity
         else:
             unrealized_pnl = (entry_price - current_price) * quantity
+            position_value = entry_value + unrealized_pnl
         fees = t.get("entry_fee_usd", 0)
         unrealized_pnl -= fees
         pnl_pct = (unrealized_pnl / entry_value * 100) if entry_value > 0 else 0
@@ -529,7 +538,7 @@ def get_live_balance(account: str = "default"):
     open_pos = live_total - usdt
     return {
         "cash_balance_usd": round(usdt, 5),
-        "open_position_value_usd": round(max(open_pos, 0), 5),
+        "open_position_value_usd": round(open_pos, 5),
         "total_live_balance_usd": round(live_total, 5),
         "open_trade_count": len(acct.trade_store.get_open_trades()),
     }
