@@ -84,42 +84,39 @@ async def _fetch_prices_batch(symbols: list[str], timeout_sec: float = 8.0, max_
     return prices
 
 
-def _calc_open_position_value_sync(open_trades: list[dict], prices: dict[str, float]) -> float:
-    value = 0.0
-    for t in open_trades:
-        sym = t.get("symbol", "")
-        qty = t.get("quantity", 0)
-        price = prices.get(sym, 0) or t.get("entry_price", 0)
-        side = t.get("side", "buy")
-        if side == "buy":
-            value += price * qty
-        else:
-            value -= price * qty
-    return value
-
-
-def _fast_live_balance(pe=None, ts=None) -> float:
-    pe = pe or paper_exchange
-    ts = ts or trade_store
-    usdt = pe.balances.get("USDT", 0)
-    open_trades = ts.get_open_trades()
-    entry_prices = _entry_price_map(ts)
+def _get_cached_prices() -> dict[str, float]:
     cached_prices: dict[str, float] = {}
     for cache_key, cached in live_prices._ticker_cache.items():
         if cached and cached.get("last", 0) > 0:
             sym = cache_key.split(":", 1)[-1] if ":" in cache_key else cache_key
             cached_prices[sym] = cached["last"]
-    pos_value = 0.0
-    for t in open_trades:
-        sym = t.get("symbol", "")
-        qty = t.get("quantity", 0)
-        price = cached_prices.get(sym) or entry_prices.get(sym) or t.get("entry_price", 0)
-        side = t.get("side", "buy")
-        if side == "buy":
-            pos_value += price * qty
+    return cached_prices
+
+
+def _resolve_token_price(token: str, cached_prices: dict[str, float], entry_prices: dict[str, float]) -> float:
+    for quote in ("USDT", "USD"):
+        sym = f"{token}/{quote}"
+        p = cached_prices.get(sym) or entry_prices.get(sym)
+        if p and p > 0:
+            return p
+    return 0.0
+
+
+def _fast_live_balance(pe=None, ts=None) -> float:
+    pe = pe or paper_exchange
+    ts = ts or trade_store
+    cached_prices = _get_cached_prices()
+    entry_prices = _entry_price_map(ts)
+    total = 0.0
+    for asset, balance in pe.balances.items():
+        if abs(balance) < 1e-10:
+            continue
+        if asset in ("USDT", "USD"):
+            total += balance
         else:
-            pos_value -= price * qty
-    return round(usdt + pos_value, 5)
+            price = _resolve_token_price(asset, cached_prices, entry_prices)
+            total += balance * price
+    return round(total, 5)
 
 router = APIRouter()
 
@@ -364,15 +361,15 @@ def get_accounting_summary(account: str = "default"):
     acct = _resolve_account(account)
     data = acct.trade_store.full_accounting()
     live_total = _fast_live_balance(acct.paper_exchange, acct.trade_store)
-    usdt = acct.paper_exchange.balances.get("USDT", 0)
-    open_pos_value = live_total - usdt
+    cash = sum(v for k, v in acct.paper_exchange.balances.items() if k in ("USDT", "USD"))
+    open_pos_value = live_total - cash
     deps = data["summary"]["total_deposits_usd"]
     wds = data["summary"]["total_withdrawals_usd"]
     net_deps = deps - wds
     live_pnl = live_total - net_deps if net_deps > 0 else 0
     data["summary"]["account_value_usd"] = round(live_total, 5)
     data["summary"]["net_pnl_usd"] = round(live_pnl, 5)
-    data["summary"]["cash_balance_usd"] = round(usdt, 5)
+    data["summary"]["cash_balance_usd"] = round(cash, 5)
     data["summary"]["open_position_value_usd"] = round(open_pos_value, 5)
     data["summary"]["daily_target_pct"] = acct.config.daily_target_pct
     data["summary"]["target_hit"] = acct._target_hit
@@ -533,11 +530,11 @@ def get_total_fees(account: str = "default"):
 @router.get("/accounting/live-balance")
 def get_live_balance(account: str = "default"):
     acct = _resolve_account(account)
-    usdt = acct.paper_exchange.balances.get("USDT", 0)
+    cash = sum(v for k, v in acct.paper_exchange.balances.items() if k in ("USDT", "USD"))
     live_total = _fast_live_balance(acct.paper_exchange, acct.trade_store)
-    open_pos = live_total - usdt
+    open_pos = live_total - cash
     return {
-        "cash_balance_usd": round(usdt, 5),
+        "cash_balance_usd": round(cash, 5),
         "open_position_value_usd": round(open_pos, 5),
         "total_live_balance_usd": round(live_total, 5),
         "open_trade_count": len(acct.trade_store.get_open_trades()),
