@@ -1,9 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Scatter, Cell, Bar, ReferenceArea, ReferenceLine,
-} from "recharts";
 import {
   getAccountingSummary, getRiskStatus, getBotStatus, getPortfolioChart,
   recordDeposit, recordWithdrawal, rebalanceBuckets, getBotsRunning, getArbStatus,
@@ -11,6 +7,8 @@ import {
   createAccount, startAccountBots, stopAccountBots,
   closeTrade,
 } from "../services/api";
+import PortfolioChart from "../components/PortfolioChart";
+import SymbolChart from "../components/SymbolChart";
 
 interface BotTradeDetail {
   order_id: string;
@@ -112,157 +110,6 @@ interface RiskStatus {
   };
 }
 
-interface OHLCCandle {
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  ohlcRange: [number, number];
-  buy?: number;
-  sell?: number;
-  deposit?: number;
-}
-
-const INTERVAL_MS: Record<string, number> = {
-  "1M": 60_000, "5M": 300_000, "15M": 900_000, "1H": 3_600_000,
-  "4H": 14_400_000, "1D": 86_400_000, "1W": 604_800_000,
-};
-
-const DEFAULT_CANDLES = 60;
-const MIN_CANDLES = 5;
-const MAX_CANDLES = 300;
-
-function aggregateToCandles(
-  data: { timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[],
-  intervalMs: number,
-): OHLCCandle[] {
-  if (data.length === 0) return [];
-  const rawCandles: OHLCCandle[] = [];
-  let bucketStart = Math.floor(new Date(data[0].timestamp).getTime() / intervalMs) * intervalMs;
-  let o = data[0].balance, h = o, l = o, c = o;
-  let hasBuy = false, hasSell = false, hasDeposit = false;
-  for (const pt of data) {
-    const bucket = Math.floor(new Date(pt.timestamp).getTime() / intervalMs) * intervalMs;
-    if (bucket !== bucketStart) {
-      rawCandles.push({
-        timestamp: new Date(bucketStart).toISOString(), open: o, high: h, low: l, close: c,
-        ohlcRange: [Math.min(o, c), Math.max(o, c)],
-        buy: hasBuy ? c : undefined, sell: hasSell ? c : undefined, deposit: hasDeposit ? c : undefined,
-      });
-      const gapBuckets = Math.floor((bucket - bucketStart) / intervalMs) - 1;
-      for (let g = 1; g <= gapBuckets; g++) {
-        const gapTs = bucketStart + g * intervalMs;
-        rawCandles.push({
-          timestamp: new Date(gapTs).toISOString(), open: c, high: c, low: c, close: c,
-          ohlcRange: [c, c],
-        });
-      }
-      bucketStart = bucket; o = c; h = pt.balance; l = pt.balance;
-      hasBuy = false; hasSell = false; hasDeposit = false;
-    }
-    h = Math.max(h, pt.balance); l = Math.min(l, pt.balance); c = pt.balance;
-    if (pt.buy != null) hasBuy = true;
-    if (pt.sell != null) hasSell = true;
-    if (pt.deposit != null) hasDeposit = true;
-  }
-  rawCandles.push({
-    timestamp: new Date(bucketStart).toISOString(), open: o, high: h, low: l, close: c,
-    ohlcRange: [Math.min(o, c), Math.max(o, c)],
-    buy: hasBuy ? c : undefined, sell: hasSell ? c : undefined, deposit: hasDeposit ? c : undefined,
-  });
-  const nowBucket = Math.floor(Date.now() / intervalMs) * intervalMs;
-  const lastBucket = Math.floor(new Date(rawCandles[rawCandles.length - 1].timestamp).getTime() / intervalMs) * intervalMs;
-  const trailingGap = Math.floor((nowBucket - lastBucket) / intervalMs);
-  for (let g = 1; g <= trailingGap; g++) {
-    rawCandles.push({
-      timestamp: new Date(lastBucket + g * intervalMs).toISOString(), open: c, high: c, low: c, close: c,
-      ohlcRange: [c, c],
-    });
-  }
-  if (rawCandles.length < MAX_CANDLES) {
-    const firstTs = Math.floor(new Date(rawCandles[0].timestamp).getTime() / intervalMs) * intervalMs;
-    const firstVal = rawCandles[0].open;
-    const needed = MAX_CANDLES - rawCandles.length;
-    const prepend: OHLCCandle[] = [];
-    for (let i = needed; i > 0; i--) {
-      prepend.push({
-        timestamp: new Date(firstTs - i * intervalMs).toISOString(), open: firstVal, high: firstVal, low: firstVal, close: firstVal,
-        ohlcRange: [firstVal, firstVal],
-      });
-    }
-    return [...prepend, ...rawCandles];
-  }
-  return rawCandles;
-}
-
-const CandlestickBar = (props: any) => {
-  const { x, width, payload, background } = props;
-  if (!payload || payload.high == null || payload.low == null) return null;
-  if (!background) return null;
-  const { open, high, low, close } = payload;
-  const isUp = close >= open;
-  const color = isUp ? "#00ff88" : "#ff4d6a";
-  const chartY = background.y;
-  const chartH = background.height;
-  const yDomain = (props as any)._yDomain;
-  const yMin = yDomain?.[0] ?? low;
-  const yMax = yDomain?.[1] ?? high;
-  const range = yMax - yMin || 1;
-  const scale = (v: number) => chartY + chartH - ((v - yMin) / range) * chartH;
-  const wickTop = scale(high);
-  const wickBot = scale(low);
-  const bodyTop = scale(Math.max(open, close));
-  const bodyBot = scale(Math.min(open, close));
-  const bodyH = Math.max(bodyBot - bodyTop, 1);
-  const cx = x + width / 2;
-  const bw = Math.max(width * 0.6, 3);
-  return (
-    <g>
-      <line x1={cx} y1={wickTop} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
-      <line x1={cx} y1={bodyBot} x2={cx} y2={wickBot} stroke={color} strokeWidth={1} />
-      <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} fillOpacity={isUp ? 0.3 : 0.8} stroke={color} strokeWidth={1} rx={1} />
-    </g>
-  );
-};
-
-const CustomTooltip = ({ active, payload, label, chartMode }: { active?: boolean; payload?: any[]; label?: string; chartMode?: string }) => {
-  if (active && payload?.length) {
-    const ts = label ? new Date(label).toLocaleString() : "";
-    const raw = payload[0]?.payload;
-    if (chartMode === "candle" && raw?.open != null) {
-      const isUp = raw.close >= raw.open;
-      return (
-        <div style={{ background: "#1e1e1e", border: "1px solid #222", borderRadius: 12, padding: "8px 12px", fontSize: "0.8rem" }}>
-          <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{ts}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0 8px" }}>
-            <span style={{ color: "#888" }}>O:</span><span style={{ color: isUp ? "#00ff88" : "#ff4d6a" }}>${raw.open.toFixed(5)}</span>
-            <span style={{ color: "#888" }}>H:</span><span style={{ color: "#00ff88" }}>${raw.high.toFixed(5)}</span>
-            <span style={{ color: "#888" }}>L:</span><span style={{ color: "#ff4d6a" }}>${raw.low.toFixed(5)}</span>
-            <span style={{ color: "#888" }}>C:</span><span style={{ color: isUp ? "#00ff88" : "#ff4d6a", fontWeight: 600 }}>${raw.close.toFixed(5)}</span>
-          </div>
-        </div>
-      );
-    }
-    const balanceEntry = payload.find((p: any) => p.dataKey === "balance");
-    const buyEntry = payload.find((p: any) => p.dataKey === "buy" && p.value != null);
-    const sellEntry = payload.find((p: any) => p.dataKey === "sell" && p.value != null);
-    return (
-      <div style={{ background: "#1e1e1e", border: "1px solid #222", borderRadius: 12, padding: "8px 12px", fontSize: "0.8rem" }}>
-        <div style={{ color: "#8a8a8a", marginBottom: 2 }}>{ts}</div>
-        <div style={{ color: "#00ff88", fontWeight: 600 }}>
-          ${balanceEntry?.value?.toLocaleString("en", { minimumFractionDigits: 5, maximumFractionDigits: 5 }) ?? "--"}
-        </div>
-        {buyEntry && <div style={{ color: "#00ff88", fontSize: "0.7rem", marginTop: 2 }}>BUY</div>}
-        {sellEntry && <div style={{ color: "#ff4d6a", fontSize: "0.7rem", marginTop: 2 }}>SELL</div>}
-        {payload.find((p: any) => p.dataKey === "deposit" && p.value != null) && (
-          <div style={{ color: "#ff9f1c", fontSize: "0.7rem", marginTop: 2 }}>DEPOSIT</div>
-        )}
-      </div>
-    );
-  }
-  return null;
-};
 
 interface AccountInfo {
   name: string;
@@ -296,30 +143,23 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
   const [bots, setBots] = useState<Record<string, { active_trades: number; running?: boolean }>>({});
   const [arbStatus, setArbStatus] = useState<{ running: boolean; trades_executed: number; actionable: number } | null>(null);
   const [liveBalance, setLiveBalance] = useState<LiveBalance | null>(null);
-  const [chartData, setChartData] = useState<{ timestamp: string; balance: number; buy?: number; sell?: number; deposit?: number }[]>([]);
-  const [timeRange, setTimeRange] = useState("15M");
+  const [chartData, setChartData] = useState<{ timestamp: string; balance: number }[]>([]);
+  const [tradeMarkers, setTradeMarkers] = useState<{ timestamp: string; side: string; symbol: string; type: "entry" | "exit"; pnl_usd?: number }[]>([]);
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [rebalanceMsg, setRebalanceMsg] = useState("");
-  const [showTradeDots, setShowTradeDots] = useState(true);
-  const [chartMode, setChartMode] = useState<"line" | "candle">("line");
   const [selectedTrade, setSelectedTrade] = useState<TradeEvent | null>(null);
   const [activeBotTrades, setActiveBotTrades] = useState<BotTradeDetail[]>([]);
   const [selectedBotTrade, setSelectedBotTrade] = useState<BotTradeDetail | null>(null);
   const [tradeOHLCV, setTradeOHLCV] = useState<OHLCVBar[]>([]);
   const [tradeChartLoading, setTradeChartLoading] = useState(false);
   const [closingTrade, setClosingTrade] = useState(false);
-  const [tradeEventsMap, setTradeEventsMap] = useState<Record<string, TradeEvent>>({});
-  const [zoomLeft, setZoomLeft] = useState<string | null>(null);
-  const [zoomRight, setZoomRight] = useState<string | null>(null);
-  const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null);
   const [riskCfg, setRiskCfg] = useState({ max_daily_loss_usd: 50, max_position_size_usd: 500, default_stop_loss_pct: 2, max_leverage: 3 });
   const [riskCfgDraft, setRiskCfgDraft] = useState(riskCfg);
   const [riskCfgSaving, setRiskCfgSaving] = useState(false);
   const [riskCfgMsg, setRiskCfgMsg] = useState("");
-  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -347,71 +187,17 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
 
       const chartPoints: { timestamp: string; balance: number }[] = p?.data?.chart ?? p?.data ?? [];
       const tradeEvents: TradeEvent[] = p?.data?.trades ?? [];
-      const depositEvents: { timestamp: string; type: string }[] = p?.data?.events ?? [];
 
-      const allMarkers: { timestamp: string; kind: "buy" | "sell" | "deposit"; used: boolean; tradeEvent?: TradeEvent }[] = [];
-      const teMap: Record<string, TradeEvent> = {};
-      for (const te of tradeEvents) {
-        allMarkers.push({ timestamp: te.timestamp, kind: te.side === "buy" ? "buy" : "sell", used: false, tradeEvent: te });
-      }
-      for (const de of depositEvents) {
-        if (de.type === "deposit") {
-          allMarkers.push({ timestamp: de.timestamp, kind: "deposit", used: false });
-        }
-      }
-
-      const merged: typeof chartData = chartPoints.map((pt) => {
-        const ptTime = new Date(pt.timestamp).getTime();
-        let bestIdx = -1;
-        let bestDiff = Infinity;
-        for (let i = 0; i < allMarkers.length; i++) {
-          if (allMarkers[i].used) continue;
-          const diff = Math.abs(new Date(allMarkers[i].timestamp).getTime() - ptTime);
-          if (diff < 30000 && diff < bestDiff) {
-            bestDiff = diff;
-            bestIdx = i;
-          }
-        }
-        if (bestIdx >= 0) {
-          allMarkers[bestIdx].used = true;
-          const mk = allMarkers[bestIdx];
-          if (mk.tradeEvent) teMap[pt.timestamp] = mk.tradeEvent;
-          return {
-            ...pt,
-            buy: mk.kind === "buy" ? pt.balance : undefined,
-            sell: mk.kind === "sell" ? pt.balance : undefined,
-            deposit: mk.kind === "deposit" ? pt.balance : undefined,
-          };
-        }
-        return { ...pt, buy: undefined, sell: undefined, deposit: undefined };
-      });
-
-      for (const mk of allMarkers) {
-        if (mk.used) continue;
-        if (chartPoints.length > 0) {
-          const closest = chartPoints.reduce((prev, curr) =>
-            Math.abs(new Date(curr.timestamp).getTime() - new Date(mk.timestamp).getTime()) <
-            Math.abs(new Date(prev.timestamp).getTime() - new Date(mk.timestamp).getTime()) ? curr : prev
-          );
-          merged.push({
-            timestamp: mk.timestamp,
-            balance: closest.balance,
-            buy: mk.kind === "buy" ? closest.balance : undefined,
-            sell: mk.kind === "sell" ? closest.balance : undefined,
-            deposit: mk.kind === "deposit" ? closest.balance : undefined,
-          });
-        }
-      }
-
-      for (const mk of allMarkers) {
-        if (!mk.used && mk.tradeEvent) {
-          teMap[mk.timestamp] = mk.tradeEvent;
-        }
-      }
-
-      merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      setChartData(merged);
-      setTradeEventsMap(teMap);
+      setChartData(chartPoints);
+      setTradeMarkers(
+        tradeEvents.map((te) => ({
+          timestamp: te.timestamp,
+          side: te.side,
+          symbol: te.symbol,
+          type: te.type,
+          pnl_usd: te.pnl_usd,
+        }))
+      );
     } catch {
       /* API not connected */
     }
@@ -463,86 +249,6 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
     }
   };
 
-  const formatXAxisTick = (ts: string) => {
-    const d = new Date(ts);
-    if (timeRange === "1M" || timeRange === "5M" || timeRange === "15M") {
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    } else if (timeRange === "1H" || timeRange === "4H") {
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } else if (timeRange === "1D") {
-      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    }
-    return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  };
-
-  const allCandles = aggregateToCandles(chartData, INTERVAL_MS[timeRange] ?? INTERVAL_MS["1H"]);
-  const visibleCount = zoomDomain ? zoomDomain[1] : DEFAULT_CANDLES;
-  const candleData = (() => {
-    if (allCandles.length === 0) return [];
-    const count = Math.min(visibleCount, allCandles.length);
-    return allCandles.slice(-count);
-  })();
-  const filteredChart = candleData.length > 0
-    ? candleData.map(c => ({ timestamp: c.timestamp, balance: c.close, buy: c.buy, sell: c.sell, deposit: c.deposit }))
-    : chartData.slice(-60);
-
-  const candleDomain: [number, number] = (() => {
-    if (candleData.length === 0) return [0, 100] as [number, number];
-    const allHighs = candleData.map(c => Math.max(c.open, c.close, c.high));
-    const allLows = candleData.map(c => Math.min(c.open, c.close, c.low));
-    const dataHigh = Math.max(...allHighs);
-    const dataLow = Math.min(...allLows);
-    const range = dataHigh - dataLow || 1;
-    const pad = range * 0.2;
-    let lo = dataLow - pad;
-    let hi = dataHigh + pad;
-    if (lo < 0) lo = 0;
-    return [lo, hi] as [number, number];
-  })();
-
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    const total = allCandles.length;
-    if (total < 3) return;
-    const maxCandlesForTf = MAX_CANDLES;
-    const currentVisible = zoomDomain ? zoomDomain[1] : DEFAULT_CANDLES;
-    const zoomFactor = e.deltaY > 0 ? 1.3 : 0.7;
-    const newVisible = Math.max(MIN_CANDLES, Math.min(maxCandlesForTf, Math.round(currentVisible * zoomFactor)));
-    if (newVisible === DEFAULT_CANDLES) {
-      setZoomDomain(null);
-    } else {
-      setZoomDomain([0, newVisible]);
-    }
-  }, [allCandles.length, zoomDomain, timeRange]);
-
-  useEffect(() => {
-    const el = chartContainerRef.current;
-    if (!el) return;
-    el.addEventListener("wheel", handleWheel, { passive: false });
-    return () => el.removeEventListener("wheel", handleWheel);
-  }, [handleWheel]);
-
-  const handleMouseDown = (e: any) => {
-    if (e?.activeLabel) setZoomLeft(e.activeLabel);
-  };
-  const handleMouseMove = (e: any) => {
-    if (zoomLeft && e?.activeLabel) setZoomRight(e.activeLabel);
-  };
-  const handleMouseUp = () => {
-    if (zoomLeft && zoomRight) {
-      const leftIdx = candleData.findIndex((d) => d.timestamp === zoomLeft);
-      const rightIdx = candleData.findIndex((d) => d.timestamp === zoomRight);
-      if (leftIdx >= 0 && rightIdx >= 0 && leftIdx !== rightIdx) {
-        const visCount = Math.abs(rightIdx - leftIdx);
-        if (visCount >= 2) {
-          setZoomDomain([0, visCount]);
-        }
-      }
-    }
-    setZoomLeft(null);
-    setZoomRight(null);
-  };
-  const handleZoomReset = () => setZoomDomain(null);
   const s = summary?.summary;
   const netPnl = s?.net_pnl_usd ?? 0;
   const pnlPositive = netPnl >= 0;
@@ -690,170 +396,13 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
           <span style={{ color: "var(--red)" }}>Fees: -${totalFeesPaid.toFixed(5)}</span>
         </div>
 
-        <div className="chart-container" ref={chartContainerRef} style={{ marginTop: "1rem", height: 400 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
-              data={chartMode === "candle" ? candleData : filteredChart}
-              margin={{ top: 5, right: 50, left: 0, bottom: 5 }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-            >
-              <defs>
-                <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0.2} />
-                  <stop offset="100%" stopColor={pnlPositive ? "#00ff88" : "#ff4d6a"} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis
-                dataKey="timestamp"
-                tickFormatter={formatXAxisTick}
-                stroke="#555"
-                fontSize={10}
-                tickLine={false}
-                axisLine={{ stroke: "#333" }}
-                minTickGap={80}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                orientation="right"
-                stroke="#555"
-                fontSize={10}
-                tickLine={false}
-                axisLine={{ stroke: "#333" }}
-                domain={chartMode === "candle" ? candleDomain : ["auto", "auto"]}
-                padding={{ top: 10, bottom: 10 }}
-                tickFormatter={(v: number) => `$${v.toFixed(2)}`}
-              />
-              <Tooltip content={<CustomTooltip chartMode={chartMode} />} />
-              {zoomLeft && zoomRight && (
-                <ReferenceArea x1={zoomLeft} x2={zoomRight} strokeOpacity={0.3} fill="rgba(255,255,255,0.1)" />
-              )}
-              {chartMode === "line" ? (
-                <Area
-                  type="monotone"
-                  dataKey="balance"
-                  stroke={pnlPositive ? "#00ff88" : "#ff4d6a"}
-                  strokeWidth={2}
-                  fill="url(#pnlGrad)"
-                  dot={false}
-                />
-              ) : (
-                <Bar dataKey="ohlcRange" shape={<CandlestickBar _yDomain={candleDomain} />} isAnimationActive={false} background={{ fill: "transparent" }} />
-              )}
-              {showTradeDots && (
-                <Scatter dataKey="buy" shape="circle" fill="#00ff88" isAnimationActive={false}
-                  onClick={(_: unknown, idx: number) => {
-                    const pt = filteredChart[idx];
-                    if (pt?.buy != null) {
-                      const te = tradeEventsMap[pt.timestamp];
-                      if (te) setSelectedTrade(te);
-                    }
-                  }}
-                  cursor="pointer"
-                >
-                  {filteredChart.map((entry, i) => (
-                    entry.buy != null
-                      ? <Cell key={i} fill="#00ff88" stroke="#000" strokeWidth={1} r={5} />
-                      : <Cell key={i} fill="transparent" stroke="transparent" r={0} />
-                  ))}
-                </Scatter>
-              )}
-              {showTradeDots && (
-                <Scatter dataKey="sell" shape="circle" fill="#ff4d6a" isAnimationActive={false}
-                  onClick={(_: unknown, idx: number) => {
-                    const pt = filteredChart[idx];
-                    if (pt?.sell != null) {
-                      const te = tradeEventsMap[pt.timestamp];
-                      if (te) setSelectedTrade(te);
-                    }
-                  }}
-                  cursor="pointer"
-                >
-                  {filteredChart.map((entry, i) => (
-                    entry.sell != null
-                      ? <Cell key={i} fill="#ff4d6a" stroke="#000" strokeWidth={1} r={5} />
-                      : <Cell key={i} fill="transparent" stroke="transparent" r={0} />
-                  ))}
-                </Scatter>
-              )}
-              {showTradeDots && (
-                <Scatter dataKey="deposit" shape="diamond" fill="#ff9f1c" isAnimationActive={false}>
-                  {filteredChart.map((entry, i) => (
-                    entry.deposit != null
-                      ? <Cell key={i} fill="#ff9f1c" stroke="#000" strokeWidth={1} r={6} />
-                      : <Cell key={i} fill="transparent" stroke="transparent" r={0} />
-                  ))}
-                </Scatter>
-              )}
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: "0.25rem" }}>
-            {["1M", "5M", "15M", "1H", "4H", "1D", "1W"].map((range) => (
-              <button
-                key={range}
-                className={`tab ${timeRange === range ? "active" : ""}`}
-                onClick={() => { setTimeRange(range); setZoomDomain(null); }}
-                style={{ padding: "0.4rem 0.75rem", fontSize: "0.75rem", borderBottom: "none" }}
-              >
-                {range}
-              </button>
-            ))}
-          </div>
-          {zoomDomain && (
-            <button
-              onClick={handleZoomReset}
-              style={{
-                padding: "0.35rem 0.75rem",
-                fontSize: "0.7rem",
-                background: "rgba(255,77,106,0.15)",
-                border: "1px solid #ff4d6a",
-                borderRadius: 20,
-                color: "#ff4d6a",
-                cursor: "pointer",
-              }}
-            >
-              Reset Zoom
-            </button>
-          )}
-          <button
-            onClick={() => setChartMode(chartMode === "line" ? "candle" : "line")}
-            style={{
-              padding: "0.35rem 0.75rem",
-              fontSize: "0.7rem",
-              background: chartMode === "candle" ? "rgba(255,255,255,0.1)" : "transparent",
-              border: "1px solid #444",
-              borderRadius: 20,
-              color: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            {chartMode === "line" ? "Line" : "Candle"}
-          </button>
-          <button
-            onClick={() => setShowTradeDots(!showTradeDots)}
-            style={{
-              padding: "0.35rem 0.75rem",
-              fontSize: "0.7rem",
-              background: showTradeDots ? "rgba(255,255,255,0.1)" : "transparent",
-              border: "1px solid #444",
-              borderRadius: 20,
-              color: showTradeDots ? "#fff" : "#666",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-            }}
-          >
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#00ff88", display: "inline-block" }} />
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ff4d6a", display: "inline-block" }} />
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ff9f1c", display: "inline-block" }} />
-            {showTradeDots ? "Dots On" : "Dots Off"}
-          </button>
+        <div style={{ marginTop: "1rem" }}>
+          <PortfolioChart
+            data={chartData}
+            trades={tradeMarkers}
+            height={400}
+            pnlPositive={pnlPositive}
+          />
         </div>
       </div>
 
@@ -1197,79 +746,22 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
               </div>
             )}
 
-            <div style={{ height: 280, marginBottom: "1rem" }}>
+            <div style={{ marginBottom: "1rem" }}>
               {tradeChartLoading ? (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#666" }}>Loading chart...</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 280, color: "#666" }}>Loading chart...</div>
               ) : tradeOHLCV.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={tradeOHLCV.map(c => ({
-                    time: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                    open: c.open, high: c.high, low: c.low, close: c.close,
-                    ohlcRange: [Math.min(c.open, c.close), Math.max(c.open, c.close)],
-                  }))} margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="time" stroke="#555" fontSize={9} tickLine={false} minTickGap={60} />
-                    <YAxis orientation="right" stroke="#555" fontSize={9} tickLine={false}
-                      domain={(() => {
-                        const prices = tradeOHLCV.flatMap(c => [c.open, c.close, c.high, c.low]);
-                        const allPrices = [...prices, selectedBotTrade.entry_price, selectedBotTrade.stop_loss, ...(selectedBotTrade.take_profit ? [selectedBotTrade.take_profit] : [])];
-                        const lo = Math.min(...allPrices);
-                        const hi = Math.max(...allPrices);
-                        const pad = (hi - lo) * 0.15 || hi * 0.01;
-                        return [Math.max(0, lo - pad), hi + pad];
-                      })()}
-                      tickFormatter={(v: number) => v < 0.01 ? v.toExponential(2) : `$${v.toFixed(v < 1 ? 6 : 2)}`}
-                    />
-                    <Tooltip content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = payload[0]?.payload;
-                      if (!d) return null;
-                      const isUp = d.close >= d.open;
-                      return (
-                        <div style={{ background: "#1e1e1e", border: "1px solid #222", borderRadius: 8, padding: "6px 10px", fontSize: "0.75rem" }}>
-                          <div style={{ color: "#888" }}>{d.time}</div>
-                          <div style={{ color: isUp ? "#00ff88" : "#ff4d6a" }}>O:{d.open.toFixed(8)} C:{d.close.toFixed(8)}</div>
-                          <div style={{ color: "#888" }}>H:{d.high.toFixed(8)} L:{d.low.toFixed(8)}</div>
-                        </div>
-                      );
-                    }} />
-                    <Bar dataKey="ohlcRange" isAnimationActive={false} background={{ fill: "transparent" }}
-                      shape={(props: any) => {
-                        const { x, width, payload, background: bg } = props;
-                        if (!payload || !bg) return null;
-                        const { open, high, low, close } = payload;
-                        const isUp = close >= open;
-                        const color = isUp ? "#00ff88" : "#ff4d6a";
-                        const chartY = bg.y; const chartH = bg.height;
-                        const allP = tradeOHLCV.flatMap(c => [c.open, c.close, c.high, c.low]);
-                        const extP = [...allP, selectedBotTrade.entry_price, selectedBotTrade.stop_loss, ...(selectedBotTrade.take_profit ? [selectedBotTrade.take_profit] : [])];
-                        const yMin = Math.min(...extP); const yMax = Math.max(...extP);
-                        const pad = (yMax - yMin) * 0.15 || yMax * 0.01;
-                        const domLo = Math.max(0, yMin - pad); const domHi = yMax + pad;
-                        const range = domHi - domLo || 1;
-                        const sc = (v: number) => chartY + chartH - ((v - domLo) / range) * chartH;
-                        const bTop = sc(Math.max(open, close)); const bBot = sc(Math.min(open, close));
-                        const bH = Math.max(bBot - bTop, 1);
-                        const cx = x + width / 2; const bw = Math.max(width * 0.6, 2);
-                        return (<g>
-                          <line x1={cx} y1={sc(high)} x2={cx} y2={bTop} stroke={color} strokeWidth={1} />
-                          <line x1={cx} y1={bBot} x2={cx} y2={sc(low)} stroke={color} strokeWidth={1} />
-                          <rect x={cx - bw / 2} y={bTop} width={bw} height={bH} fill={color} fillOpacity={isUp ? 0.3 : 0.8} stroke={color} strokeWidth={1} rx={1} />
-                        </g>);
-                      }}
-                    />
-                    <ReferenceLine y={selectedBotTrade.entry_price} stroke="#3b82f6" strokeDasharray="5 3" strokeWidth={2}
-                      label={{ value: `Entry $${selectedBotTrade.entry_price < 0.01 ? selectedBotTrade.entry_price.toExponential(3) : selectedBotTrade.entry_price.toFixed(6)}`, position: "left", fill: "#3b82f6", fontSize: 10 }} />
-                    <ReferenceLine y={selectedBotTrade.stop_loss} stroke="#ff4d6a" strokeDasharray="4 4" strokeWidth={1.5}
-                      label={{ value: `SL $${selectedBotTrade.stop_loss < 0.01 ? selectedBotTrade.stop_loss.toExponential(3) : selectedBotTrade.stop_loss.toFixed(6)}`, position: "left", fill: "#ff4d6a", fontSize: 10 }} />
-                    {selectedBotTrade.take_profit && (
-                      <ReferenceLine y={selectedBotTrade.take_profit} stroke="#00ff88" strokeDasharray="4 4" strokeWidth={1.5}
-                        label={{ value: `TP $${selectedBotTrade.take_profit < 0.01 ? selectedBotTrade.take_profit.toExponential(3) : selectedBotTrade.take_profit.toFixed(6)}`, position: "left", fill: "#00ff88", fontSize: 10 }} />
-                    )}
-                  </ComposedChart>
-                </ResponsiveContainer>
+                <SymbolChart
+                  data={tradeOHLCV}
+                  symbol={selectedBotTrade.symbol}
+                  entryPrice={selectedBotTrade.entry_price}
+                  stopLoss={selectedBotTrade.stop_loss}
+                  takeProfit={selectedBotTrade.take_profit ?? undefined}
+                  height={320}
+                  showBB={true}
+                  showRSI={true}
+                />
               ) : (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#666", fontSize: "0.85rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 280, color: "#666", fontSize: "0.85rem" }}>
                   No chart data available for this symbol
                 </div>
               )}
