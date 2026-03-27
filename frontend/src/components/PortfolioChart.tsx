@@ -26,7 +26,7 @@ interface TradeMarker {
 }
 
 type ChartMode = "area" | "candle";
-type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "all";
+type TimeRange = "1m" | "5m" | "15m" | "1h" | "6h" | "24h" | "7d" | "30d" | "all";
 
 interface PortfolioChartProps {
   data: ChartPoint[];
@@ -47,6 +47,9 @@ function filterByRange<T extends { timestamp: string }>(data: T[], range: TimeRa
   if (range === "all") return data;
   const now = Date.now();
   const ms: Record<TimeRange, number> = {
+    "1m": 60_000,
+    "5m": 300_000,
+    "15m": 900_000,
     "1h": 3600_000,
     "6h": 21600_000,
     "24h": 86400_000,
@@ -257,7 +260,7 @@ export default function PortfolioChart({
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.3rem" }}>
         <div style={{ display: "flex", gap: "0.25rem" }}>
-          {(["1h", "6h", "24h", "7d", "30d", "all"] as TimeRange[]).map((r) => (
+          {(["1m", "5m", "15m", "1h", "6h", "24h", "7d", "30d", "all"] as TimeRange[]).map((r) => (
             <button key={r} onClick={() => { setTimeRange(r); initRef.current = false; }} style={btnStyle(timeRange === r)}>{r}</button>
           ))}
         </div>
