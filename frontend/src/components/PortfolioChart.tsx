@@ -70,6 +70,7 @@ export default function PortfolioChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
+  const markersRef = useRef<ReturnType<typeof createSeriesMarkers> | null>(null);
   const initRef = useRef(false);
   const [mode, setMode] = useState<ChartMode>("area");
   const [timeRange, setTimeRange] = useState<TimeRange>("all");
@@ -142,6 +143,7 @@ export default function PortfolioChart({
 
     chartRef.current = chart;
     seriesRef.current = series;
+    markersRef.current = null;
 
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -155,6 +157,7 @@ export default function PortfolioChart({
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      markersRef.current = null;
       initRef.current = false;
     };
   }, [height, pnlPositive, mode]);
@@ -212,8 +215,8 @@ export default function PortfolioChart({
       seriesRef.current.setData(deduped);
     }
 
-    if (showMarkers && trades.length > 0 && mode === "area") {
-      const filteredTrades = filterByRange(trades, timeRange);
+    if (mode === "area" && seriesRef.current) {
+      const filteredTrades = showMarkers && trades.length > 0 ? filterByRange(trades, timeRange) : [];
       const markers = filteredTrades
         .map((t) => {
           const time = toUTCTimestamp(t.timestamp);
@@ -234,9 +237,11 @@ export default function PortfolioChart({
         })
         .sort((a, b) => (a.time as number) - (b.time as number));
 
-      createSeriesMarkers(seriesRef.current, markers);
-    } else if (mode === "area") {
-      createSeriesMarkers(seriesRef.current, []);
+      if (markersRef.current) {
+        markersRef.current.setMarkers(markers);
+      } else {
+        markersRef.current = createSeriesMarkers(seriesRef.current, markers);
+      }
     }
 
     if (!initRef.current) {
