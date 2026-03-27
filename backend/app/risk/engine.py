@@ -180,14 +180,14 @@ class RiskEngine:
 
         risk_pct_map = {
             "scalper": 5.0, "swing": 5.0, "long_term": 5.0,
-            "grid": 4.0, "mean_reversion": 4.0, "momentum": 5.0, "dca": 4.0,
+            "grid": 2.0, "mean_reversion": 3.0, "momentum": 5.0, "dca": 3.0,
         }
         base_risk = risk_pct_map.get(bot_type, 5.0)
         risk_pct = base_risk * min(max(signal_confidence, 0.5), 1.0)
 
         sl_multiplier_map = {
-            "scalper": 1.2, "swing": 1.5, "long_term": 2.0,
-            "grid": 1.2, "mean_reversion": 1.5, "momentum": 1.5, "dca": 1.5,
+            "scalper": 1.5, "swing": 2.0, "long_term": 2.5,
+            "grid": 2.5, "mean_reversion": 2.0, "momentum": 1.8, "dca": 2.0,
         }
         sl_multiplier = sl_multiplier_map.get(bot_type, 1.5)
 
@@ -207,8 +207,8 @@ class RiskEngine:
             )
 
         rr_ratio_map = {
-            "scalper": 2.0, "swing": 2.5, "long_term": 3.0,
-            "grid": 2.0, "mean_reversion": 2.0, "momentum": 2.5, "dca": 2.0,
+            "scalper": 1.5, "swing": 2.5, "long_term": 3.0,
+            "grid": 1.0, "mean_reversion": 1.5, "momentum": 2.0, "dca": 1.5,
         }
         rr_ratio = rr_ratio_map.get(bot_type, 2.0)
         take_profit = self.calculate_take_profit(entry_price, stop_loss, side, rr_ratio)

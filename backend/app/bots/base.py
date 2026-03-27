@@ -45,32 +45,32 @@ MIN_PRICE_USD = 0.0001
 CEX_ONLY_EXCHANGES = {"binance", "coinbase", "kraken", "kucoin", "okx", "bybit", "gateio", "bitget", "mexc"}
 
 MAX_OPEN_TRADES = {
-    "scalper": 10,
-    "swing": 8,
-    "long_term": 8,
-    "grid": 10,
-    "mean_reversion": 8,
-    "momentum": 8,
-    "dca": 10,
+    "scalper": 8,
+    "swing": 6,
+    "long_term": 6,
+    "grid": 6,
+    "mean_reversion": 6,
+    "momentum": 6,
+    "dca": 8,
 }
 GLOBAL_MAX_OPEN = 60
 SYMBOL_COOLDOWN_SECONDS = {
-    "scalper": 300,
-    "swing": 1800,
+    "scalper": 600,
+    "swing": 3600,
     "long_term": 7200,
-    "grid": 120,
-    "mean_reversion": 300,
-    "momentum": 600,
-    "dca": 600,
+    "grid": 600,
+    "mean_reversion": 600,
+    "momentum": 900,
+    "dca": 900,
 }
 MIN_CONFIDENCE = {
-    "scalper": 0.20,
-    "swing": 0.20,
-    "long_term": 0.15,
-    "grid": 0.0,
-    "mean_reversion": 0.10,
-    "momentum": 0.20,
-    "dca": 0.0,
+    "scalper": 0.25,
+    "swing": 0.25,
+    "long_term": 0.20,
+    "grid": 0.20,
+    "mean_reversion": 0.20,
+    "momentum": 0.25,
+    "dca": 0.15,
 }
 MIN_POSITION_USD = 1.0
 
@@ -95,13 +95,13 @@ MIN_PROFIT_BEFORE_EXIT_PCT = {
 }
 
 TRAILING_STOP_ATR_MULT = {
-    "scalper": 1.5,
-    "swing": 2.0,
-    "long_term": 2.5,
-    "grid": 1.5,
-    "mean_reversion": 1.5,
-    "momentum": 2.0,
-    "dca": 2.0,
+    "scalper": 2.0,
+    "swing": 2.5,
+    "long_term": 3.0,
+    "grid": 2.5,
+    "mean_reversion": 2.0,
+    "momentum": 2.5,
+    "dca": 2.5,
 }
 
 MAX_HOLD_SECONDS = {
@@ -260,9 +260,9 @@ class BaseBot(ABC):
             else:
                 return "sell"
 
-        if signal.rsi is not None and signal.rsi < 45:
+        if signal.rsi is not None and signal.rsi < 35:
             return "buy"
-        elif signal.rsi is not None and signal.rsi > 55:
+        elif signal.rsi is not None and signal.rsi > 65:
             return "sell"
         elif signal.ema_trend in ("bullish", "strong_bullish"):
             return "buy"
@@ -270,7 +270,13 @@ class BaseBot(ABC):
             return "sell"
         elif signal.macd_signal in ("bullish", "bullish_crossover"):
             return "buy"
-        return "buy"
+        elif signal.macd_signal in ("bearish", "bearish_crossover"):
+            return "sell"
+        if signal.cmf > 0.05:
+            return "buy"
+        elif signal.cmf < -0.05:
+            return "sell"
+        return "buy" if signal.zscore < 0 else "sell"
 
     async def run_cycle(self, exchange_id: str):
         self._cycle_count += 1
@@ -542,14 +548,14 @@ class BaseBot(ABC):
                         analyzer2 = TechnicalAnalyzer(df2)
                         signal2 = analyzer2.analyze()
                         if await self.evaluate_exit(trade, signal2):
-                            if move_pct >= min_profit_pct:
+                            if move_pct >= min_profit_pct or move_pct < -min_profit_pct:
                                 self._trailing_stops.pop(order_id, None)
                                 self._best_prices.pop(order_id, None)
                                 await self.close_trade(exchange_id, trade, "closed")
                                 trades_closed += 1
                             else:
                                 self._last_scan_results[symbol] = (
-                                    f"exit signal but move {move_pct:+.2f}% < min {min_profit_pct:.2f}% (hold {hold_seconds:.0f}s)"
+                                    f"exit signal but move {move_pct:+.2f}% in dead zone (hold {hold_seconds:.0f}s)"
                                 )
 
             except Exception as e:

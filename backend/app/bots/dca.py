@@ -29,12 +29,18 @@ class DCABot(BaseBot):
             return False
 
         if regime and regime.regime == MarketRegime.STRONG_TREND_DOWN:
-            if signal.adx >= 35:
+            return False
+
+        if regime and regime.regime == MarketRegime.TREND_DOWN:
+            if signal.adx >= 25:
                 return False
 
         if signal.overall_signal in ("sell", "strong_sell"):
-            if signal.ema_trend == "strong_bearish" and signal.adx >= 30:
+            if signal.ema_trend in ("bearish", "strong_bearish"):
                 return False
+
+        if signal.confidence < 0.15:
+            return False
 
         score = 0.0
 
@@ -42,23 +48,25 @@ class DCABot(BaseBot):
             score += 3.5
         elif signal.rsi is not None and signal.rsi < 30:
             score += 2.5
-        elif signal.rsi is not None and signal.rsi < 40:
+        elif signal.rsi is not None and signal.rsi < 35:
             score += 1.5
 
         if signal.bollinger_signal == "oversold":
-            score += 2.0
+            score += 2.5
 
         if signal.ema_trend in ("bullish", "strong_bullish"):
-            score += 2.0
+            score += 2.5
         elif signal.ema_trend == "neutral":
             score += 0.5
         elif signal.ema_trend == "bearish":
-            score -= 0.5
+            score -= 1.0
         elif signal.ema_trend == "strong_bearish":
-            score -= 1.5
+            score -= 2.0
 
         if signal.macd_signal in ("bullish", "bullish_crossover"):
-            score += 1.5
+            score += 2.0
+        elif signal.macd_signal in ("bearish", "bearish_crossover"):
+            score -= 1.0
 
         if signal.volume_trend in ("high", "very_high"):
             score += 1.0
@@ -70,6 +78,8 @@ class DCABot(BaseBot):
 
         if signal.obv_trend == "bullish":
             score += 1.0
+        elif signal.obv_trend == "bearish":
+            score -= 0.5
 
         if signal.stoch_rsi_k < 15:
             score += 1.5
@@ -83,6 +93,8 @@ class DCABot(BaseBot):
 
         if signal.sr_proximity == "near_support":
             score += 1.5
+        elif signal.sr_proximity == "near_resistance":
+            score -= 1.0
 
         if signal.vwap_signal == "below":
             score += 0.5
@@ -96,7 +108,7 @@ class DCABot(BaseBot):
         if regime and regime.regime == MarketRegime.RANGING:
             score += 0.5
 
-        return score >= 5.0
+        return score >= 7.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         entry_price = trade.get("entry_price", 0)

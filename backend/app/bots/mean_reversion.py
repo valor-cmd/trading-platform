@@ -28,13 +28,16 @@ class MeanReversionBot(BaseBot):
             return False
 
         if regime and regime.regime in (MarketRegime.STRONG_TREND_UP, MarketRegime.STRONG_TREND_DOWN):
-            if signal.adx >= 35:
+            return False
+
+        if regime and regime.regime in (MarketRegime.TREND_UP, MarketRegime.TREND_DOWN):
+            if signal.adx >= 25:
                 return False
 
         if signal.overall_signal == "hold":
             return False
 
-        if signal.adx >= 30:
+        if signal.adx >= 22:
             return False
 
         score = 0.0
@@ -72,9 +75,12 @@ class MeanReversionBot(BaseBot):
 
         extremes_count = sum([rsi_extreme, bb_extreme, zscore_extreme])
         if extremes_count >= 2:
-            score += 2.0
+            score += 3.0
         elif extremes_count == 1:
             score += 0.5
+
+        if extremes_count < 2:
+            return False
 
         if signal.stoch_rsi_k < 10 or signal.stoch_rsi_k > 90:
             score += 2.0
@@ -106,7 +112,7 @@ class MeanReversionBot(BaseBot):
         if regime and regime.regime == MarketRegime.RANGING:
             score += 1.0
 
-        return score >= 7.0
+        return score >= 9.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         if abs(signal.zscore) < 0.5:

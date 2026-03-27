@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   createSeriesMarkers,
@@ -6,6 +6,7 @@ import {
   LineStyle,
   CrosshairMode,
   AreaSeries,
+  CandlestickSeries,
   type IChartApi,
   type ISeriesApi,
   type SeriesType,
@@ -24,6 +25,9 @@ interface TradeMarker {
   pnl_usd?: number;
 }
 
+type ChartMode = "area" | "candle";
+type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "all";
+
 interface PortfolioChartProps {
   data: ChartPoint[];
   trades?: TradeMarker[];
@@ -35,6 +39,25 @@ function toUTCTimestamp(iso: string) {
   return Math.floor(new Date(iso).getTime() / 1000) as unknown as import("lightweight-charts").UTCTimestamp;
 }
 
+function shortSymbol(sym: string) {
+  return sym.replace("/USDT", "").replace("/USDC", "").replace("/USD", "");
+}
+
+function filterByRange<T extends { timestamp: string }>(data: T[], range: TimeRange): T[] {
+  if (range === "all") return data;
+  const now = Date.now();
+  const ms: Record<TimeRange, number> = {
+    "1h": 3600_000,
+    "6h": 21600_000,
+    "24h": 86400_000,
+    "7d": 604800_000,
+    "30d": 2592000_000,
+    "all": 0,
+  };
+  const cutoff = now - ms[range];
+  return data.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
+}
+
 export default function PortfolioChart({
   data,
   trades = [],
@@ -44,8 +67,12 @@ export default function PortfolioChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
+  const initRef = useRef(false);
+  const [mode, setMode] = useState<ChartMode>("area");
+  const [timeRange, setTimeRange] = useState<TimeRange>("all");
+  const [showMarkers, setShowMarkers] = useState(true);
 
-  const buildChart = useCallback(() => {
+  useEffect(() => {
     if (!containerRef.current) return;
 
     if (chartRef.current) {
@@ -53,6 +80,7 @@ export default function PortfolioChart({
       chartRef.current = null;
       seriesRef.current = null;
     }
+    initRef.current = false;
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
@@ -73,7 +101,7 @@ export default function PortfolioChart({
       },
       rightPriceScale: {
         borderColor: "rgba(255,255,255,0.1)",
-        scaleMargins: { top: 0.1, bottom: 0.1 },
+        scaleMargins: { top: 0.15, bottom: 0.15 },
       },
       timeScale: {
         borderColor: "rgba(255,255,255,0.1)",
@@ -85,35 +113,105 @@ export default function PortfolioChart({
 
     const lineColor = pnlPositive ? "#00ff88" : "#ff4d6a";
 
-    const areaSeries = chart.addSeries(AreaSeries, {
-      lineColor,
-      lineWidth: 2,
-      topColor: pnlPositive ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)",
-      bottomColor: "transparent",
-      crosshairMarkerRadius: 4,
-      crosshairMarkerBorderColor: lineColor,
-      crosshairMarkerBackgroundColor: "#000",
-      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
-    });
-
-    const lineData = data
-      .map((pt) => ({
-        time: toUTCTimestamp(pt.timestamp),
-        value: pt.balance,
-      }))
-      .sort((a, b) => (a.time as number) - (b.time as number));
-
-    const deduped: typeof lineData = [];
-    for (const pt of lineData) {
-      if (deduped.length === 0 || (pt.time as number) > (deduped[deduped.length - 1].time as number)) {
-        deduped.push(pt);
-      }
+    let series: ISeriesApi<SeriesType>;
+    if (mode === "candle") {
+      series = chart.addSeries(CandlestickSeries, {
+        upColor: "#00ff88",
+        downColor: "#ff4d6a",
+        borderUpColor: "#00ff88",
+        borderDownColor: "#ff4d6a",
+        wickUpColor: "#00ff88",
+        wickDownColor: "#ff4d6a",
+        priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+      });
+    } else {
+      series = chart.addSeries(AreaSeries, {
+        lineColor,
+        lineWidth: 2,
+        topColor: pnlPositive ? "rgba(0,255,136,0.15)" : "rgba(255,77,106,0.15)",
+        bottomColor: "transparent",
+        crosshairMarkerRadius: 4,
+        crosshairMarkerBorderColor: lineColor,
+        crosshairMarkerBackgroundColor: "#000",
+        priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+      });
     }
 
-    areaSeries.setData(deduped);
+    chartRef.current = chart;
+    seriesRef.current = series;
 
-    if (trades.length > 0) {
-      const markers = trades
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        chart.applyOptions({ width: entry.contentRect.width });
+      }
+    });
+    ro.observe(containerRef.current);
+
+    return () => {
+      ro.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      initRef.current = false;
+    };
+  }, [height, pnlPositive, mode]);
+
+  useEffect(() => {
+    if (!seriesRef.current || !chartRef.current) return;
+
+    const filtered = filterByRange(data, timeRange);
+
+    if (mode === "candle") {
+      const bucketMs = 300_000;
+      const buckets = new Map<number, { o: number; h: number; l: number; c: number }>();
+      for (const pt of filtered) {
+        const ts = Math.floor(new Date(pt.timestamp).getTime() / bucketMs) * bucketMs;
+        const existing = buckets.get(ts);
+        if (!existing) {
+          buckets.set(ts, { o: pt.balance, h: pt.balance, l: pt.balance, c: pt.balance });
+        } else {
+          existing.h = Math.max(existing.h, pt.balance);
+          existing.l = Math.min(existing.l, pt.balance);
+          existing.c = pt.balance;
+        }
+      }
+      const candleData = Array.from(buckets.entries())
+        .map(([ts, b]) => ({
+          time: (ts / 1000) as unknown as import("lightweight-charts").UTCTimestamp,
+          open: b.o,
+          high: b.h,
+          low: b.l,
+          close: b.c,
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number));
+
+      const dedupedCandles: typeof candleData = [];
+      for (const c of candleData) {
+        if (dedupedCandles.length === 0 || (c.time as number) > (dedupedCandles[dedupedCandles.length - 1].time as number)) {
+          dedupedCandles.push(c);
+        }
+      }
+      seriesRef.current.setData(dedupedCandles);
+    } else {
+      const lineData = filtered
+        .map((pt) => ({
+          time: toUTCTimestamp(pt.timestamp),
+          value: pt.balance,
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number));
+
+      const deduped: typeof lineData = [];
+      for (const pt of lineData) {
+        if (deduped.length === 0 || (pt.time as number) > (deduped[deduped.length - 1].time as number)) {
+          deduped.push(pt);
+        }
+      }
+      seriesRef.current.setData(deduped);
+    }
+
+    if (showMarkers && trades.length > 0 && mode === "area") {
+      const filteredTrades = filterByRange(trades, timeRange);
+      const markers = filteredTrades
         .map((t) => {
           const time = toUTCTimestamp(t.timestamp);
           const isBuy = t.side === "buy";
@@ -126,41 +224,50 @@ export default function PortfolioChart({
               : (isBuy ? "#00ff88" : "#ff4d6a"),
             shape: isExit ? ("square" as const) : (isBuy ? ("arrowUp" as const) : ("arrowDown" as const)),
             text: isExit
-              ? `${t.symbol} ${t.pnl_usd != null ? (t.pnl_usd >= 0 ? "+" : "") + "$" + t.pnl_usd.toFixed(2) : ""}`
-              : `${t.side.toUpperCase()} ${t.symbol}`,
-            size: 1,
+              ? `${shortSymbol(t.symbol)} ${t.pnl_usd != null ? (t.pnl_usd >= 0 ? "+" : "") + t.pnl_usd.toFixed(2) : ""}`
+              : `${t.side === "buy" ? "B" : "S"} ${shortSymbol(t.symbol)}`,
+            size: 0,
           };
         })
         .sort((a, b) => (a.time as number) - (b.time as number));
 
-      createSeriesMarkers(areaSeries, markers);
+      createSeriesMarkers(seriesRef.current, markers);
+    } else if (mode === "area") {
+      createSeriesMarkers(seriesRef.current, []);
     }
 
-    chart.timeScale().fitContent();
-    chartRef.current = chart;
-    seriesRef.current = areaSeries as unknown as ISeriesApi<SeriesType>;
-  }, [data, trades, height, pnlPositive]);
+    if (!initRef.current) {
+      chartRef.current.timeScale().fitContent();
+      initRef.current = true;
+    }
+  }, [data, trades, timeRange, showMarkers, mode]);
 
-  useEffect(() => {
-    buildChart();
-    return () => {
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-      }
-    };
-  }, [buildChart]);
+  const btnStyle = (active: boolean): React.CSSProperties => ({
+    padding: "0.2rem 0.5rem",
+    fontSize: "0.65rem",
+    borderRadius: 6,
+    border: active ? "1px solid rgba(0,255,136,0.4)" : "1px solid #333",
+    background: active ? "rgba(0,255,136,0.1)" : "transparent",
+    color: active ? "#00ff88" : "#888",
+    cursor: "pointer",
+    fontWeight: active ? 600 : 400,
+  });
 
-  useEffect(() => {
-    if (!containerRef.current || !chartRef.current) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        chartRef.current?.applyOptions({ width: entry.contentRect.width });
-      }
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
-  return <div ref={containerRef} style={{ width: "100%", height }} />;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.3rem" }}>
+        <div style={{ display: "flex", gap: "0.25rem" }}>
+          {(["1h", "6h", "24h", "7d", "30d", "all"] as TimeRange[]).map((r) => (
+            <button key={r} onClick={() => { setTimeRange(r); initRef.current = false; }} style={btnStyle(timeRange === r)}>{r}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: "0.25rem" }}>
+          <button onClick={() => setMode("area")} style={btnStyle(mode === "area")}>Line</button>
+          <button onClick={() => setMode("candle")} style={btnStyle(mode === "candle")}>Candle</button>
+          <button onClick={() => setShowMarkers(!showMarkers)} style={btnStyle(showMarkers)}>Trades</button>
+        </div>
+      </div>
+      <div ref={containerRef} style={{ width: "100%", height }} />
+    </div>
+  );
 }

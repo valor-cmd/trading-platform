@@ -24,10 +24,7 @@ class GridBot(BaseBot):
         if not regime:
             return False
 
-        if regime.regime not in (MarketRegime.RANGING, MarketRegime.VOLATILE):
-            return False
-
-        if regime.regime == MarketRegime.VOLATILE and signal.adx >= 30:
+        if regime.regime != MarketRegime.RANGING:
             return False
 
         if signal.bb_width <= 0:
@@ -36,55 +33,70 @@ class GridBot(BaseBot):
         if signal.atr <= 0:
             return False
 
-        if signal.adx >= 25:
+        if signal.adx >= 22:
+            return False
+
+        if signal.confidence < 0.20:
+            return False
+
+        if signal.overall_signal == "hold":
             return False
 
         score = 0.0
 
-        if regime.regime == MarketRegime.RANGING:
-            score += 3.0
-
-        if regime.regime == MarketRegime.VOLATILE and signal.adx < 25:
-            score += 1.5
+        score += 3.0
 
         if signal.bollinger_signal in ("oversold", "overbought"):
-            score += 2.5
-
-        if signal.rsi is not None:
-            if signal.rsi < 25 or signal.rsi > 75:
-                score += 2.5
-            elif signal.rsi < 35 or signal.rsi > 65:
-                score += 1.0
-
-        if signal.stoch_rsi_k < 15 or signal.stoch_rsi_k > 85:
-            score += 1.5
-        elif signal.stoch_rsi_k < 20 or signal.stoch_rsi_k > 80:
-            score += 0.5
-
-        if signal.mfi < 25 or signal.mfi > 75:
+            score += 3.0
+        elif signal.bollinger_signal in ("approaching_oversold", "approaching_overbought"):
             score += 1.0
 
-        if signal.williams_r < -80 or signal.williams_r > -20:
+        rsi_extreme = False
+        if signal.rsi is not None:
+            if signal.rsi < 25 or signal.rsi > 75:
+                score += 3.0
+                rsi_extreme = True
+            elif signal.rsi < 30 or signal.rsi > 70:
+                score += 1.5
+                rsi_extreme = True
+
+        if signal.stoch_rsi_k < 10 or signal.stoch_rsi_k > 90:
+            score += 2.0
+        elif signal.stoch_rsi_k < 20 or signal.stoch_rsi_k > 80:
+            score += 1.0
+
+        if signal.mfi < 20 or signal.mfi > 80:
+            score += 1.5
+
+        if signal.williams_r < -85 or signal.williams_r > -15:
             score += 1.0
 
         if signal.keltner_signal in ("oversold", "overbought"):
-            score += 1.0
+            score += 1.5
 
         if signal.volume_trend in ("high", "very_high"):
             score += 1.0
 
-        if signal.adx < 15:
+        if signal.adx < 12:
+            score += 2.0
+        elif signal.adx < 18:
+            score += 1.0
+
+        if abs(signal.zscore) >= 2.0:
+            score += 2.0
+        elif abs(signal.zscore) >= 1.5:
+            score += 1.0
+
+        if signal.sr_proximity == "near_support" and signal.overall_signal in ("buy", "strong_buy"):
             score += 1.5
-        elif signal.adx < 20:
-            score += 1.0
+        elif signal.sr_proximity == "near_resistance" and signal.overall_signal in ("sell", "strong_sell"):
+            score += 1.5
 
-        if signal.zscore < -1.5 or signal.zscore > 1.5:
-            score += 1.0
+        if not rsi_extreme and signal.bollinger_signal not in ("oversold", "overbought"):
+            if abs(signal.zscore) < 1.5:
+                return False
 
-        if signal.sr_proximity in ("near_support", "near_resistance"):
-            score += 1.0
-
-        return score >= 6.0
+        return score >= 9.0
 
     async def evaluate_exit(self, trade: dict, signal: SignalResult) -> bool:
         regime = signal.regime
