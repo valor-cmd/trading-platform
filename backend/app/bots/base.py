@@ -64,13 +64,13 @@ SYMBOL_COOLDOWN_SECONDS = {
     "dca": 900,
 }
 MIN_CONFIDENCE = {
-    "scalper": 0.25,
-    "swing": 0.25,
-    "long_term": 0.20,
-    "grid": 0.20,
-    "mean_reversion": 0.20,
-    "momentum": 0.25,
-    "dca": 0.15,
+    "scalper": 0.35,
+    "swing": 0.35,
+    "long_term": 0.30,
+    "grid": 0.30,
+    "mean_reversion": 0.30,
+    "momentum": 0.35,
+    "dca": 0.25,
 }
 MIN_POSITION_USD = 1.0
 
@@ -163,7 +163,7 @@ class BaseBot(ABC):
                 "spread_pct": ot.get("spread_pct", 0),
                 "opened_at": ot.get("opened_at", ""),
                 "reasoning": ot.get("reasoning", "resumed after restart"),
-                "signal_confidence": 0,
+                "signal_confidence": ot.get("signal_confidence", 0),
                 "bot_type": self.bot_type.value,
                 "regime": ot.get("regime", "unknown"),
                 "strategy": ot.get("strategy", ""),
@@ -636,6 +636,7 @@ class BaseBot(ABC):
             "regime": signal.regime.regime.value if signal.regime else "unknown",
             "strategy": strategy_desc,
             "signal_score": signal_score,
+            "signal_confidence": signal.confidence,
         })
 
         await kv.hset(

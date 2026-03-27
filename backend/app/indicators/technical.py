@@ -653,9 +653,8 @@ class TechnicalAnalyzer:
             elif net < 0:
                 bearish_points += 0.5
 
-        total_possible = 18.0
         net = bullish_points - bearish_points
-        confidence = min(abs(net) / total_possible, 1.0)
+        confidence = min(abs(net) / 6.0, 1.0)
 
         if net >= 4:
             overall = "strong_buy"
