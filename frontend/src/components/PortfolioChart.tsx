@@ -43,23 +43,17 @@ function shortSymbol(sym: string) {
   return sym.replace("/USDT", "").replace("/USDC", "").replace("/USD", "");
 }
 
-function filterByRange<T extends { timestamp: string }>(data: T[], range: TimeRange): T[] {
-  if (range === "all") return data;
-  const now = Date.now();
-  const ms: Record<TimeRange, number> = {
-    "1m": 60_000,
-    "5m": 300_000,
-    "15m": 900_000,
-    "1h": 3600_000,
-    "6h": 21600_000,
-    "24h": 86400_000,
-    "7d": 604800_000,
-    "30d": 2592000_000,
-    "all": 0,
-  };
-  const cutoff = now - ms[range];
-  return data.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
-}
+const RANGE_MS: Record<TimeRange, number> = {
+  "1m": 60_000,
+  "5m": 300_000,
+  "15m": 900_000,
+  "1h": 3600_000,
+  "6h": 21600_000,
+  "24h": 86400_000,
+  "7d": 604800_000,
+  "30d": 2592000_000,
+  "all": 0,
+};
 
 export default function PortfolioChart({
   data,
@@ -70,11 +64,13 @@ export default function PortfolioChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
-  const markersRef = useRef<ReturnType<typeof createSeriesMarkers> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef = useRef<any>(null);
   const initRef = useRef(false);
   const [mode, setMode] = useState<ChartMode>("area");
   const [timeRange, setTimeRange] = useState<TimeRange>("all");
   const [showMarkers, setShowMarkers] = useState(true);
+  const prevRangeRef = useRef<TimeRange>(timeRange);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -165,12 +161,10 @@ export default function PortfolioChart({
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current) return;
 
-    const filtered = filterByRange(data, timeRange);
-
     if (mode === "candle") {
       const bucketMs = 300_000;
       const buckets = new Map<number, { o: number; h: number; l: number; c: number }>();
-      for (const pt of filtered) {
+      for (const pt of data) {
         const ts = Math.floor(new Date(pt.timestamp).getTime() / bucketMs) * bucketMs;
         const existing = buckets.get(ts);
         if (!existing) {
@@ -199,7 +193,7 @@ export default function PortfolioChart({
       }
       seriesRef.current.setData(dedupedCandles);
     } else {
-      const lineData = filtered
+      const lineData = data
         .map((pt) => ({
           time: toUTCTimestamp(pt.timestamp),
           value: pt.balance,
@@ -215,9 +209,9 @@ export default function PortfolioChart({
       seriesRef.current.setData(deduped);
     }
 
-    if (mode === "area" && seriesRef.current) {
-      const filteredTrades = showMarkers && trades.length > 0 ? filterByRange(trades, timeRange) : [];
-      const markers = filteredTrades
+    if (seriesRef.current) {
+      const visibleTrades = showMarkers && trades.length > 0 ? trades : [];
+      const markers = visibleTrades
         .map((t) => {
           const time = toUTCTimestamp(t.timestamp);
           const isBuy = t.side === "buy";
@@ -244,8 +238,18 @@ export default function PortfolioChart({
       }
     }
 
-    if (!initRef.current) {
-      chartRef.current.timeScale().fitContent();
+    if (!initRef.current || timeRange !== prevRangeRef.current) {
+      prevRangeRef.current = timeRange;
+      if (timeRange === "all") {
+        chartRef.current.timeScale().fitContent();
+      } else {
+        const now = Math.floor(Date.now() / 1000);
+        const from = now - Math.floor(RANGE_MS[timeRange] / 1000);
+        chartRef.current.timeScale().setVisibleRange({
+          from: from as unknown as import("lightweight-charts").UTCTimestamp,
+          to: now as unknown as import("lightweight-charts").UTCTimestamp,
+        });
+      }
       initRef.current = true;
     }
   }, [data, trades, timeRange, showMarkers, mode]);

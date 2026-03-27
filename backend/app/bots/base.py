@@ -16,6 +16,7 @@ from app.exchange.registry import exchange_registry
 from app.indicators.technical import TechnicalAnalyzer, SignalResult, MarketRegime
 from app.indicators.sentiment import SentimentAnalyzer
 from app.indicators.confirmation import evaluate_confirmation, ConfirmationResult
+from app.indicators.backtest import check_historical_win_rate
 from app.risk.engine import RiskEngine, RiskAssessment
 from app.models.trade import BotType
 
@@ -399,6 +400,17 @@ class BaseBot(ABC):
                             else:
                                 confirmation_rejections += 1
                             continue
+
+                        try:
+                            bt_result = await check_historical_win_rate(
+                                self.exchange, exchange_id, symbol,
+                                self.bot_type.value, side, tf,
+                            )
+                            if not bt_result.approved:
+                                self._last_scan_results[symbol] = f"backtest rejected: {bt_result.reason}"
+                                continue
+                        except Exception as bt_err:
+                            logger.debug(f"{self.bot_type.value} backtest failed for {symbol}: {bt_err}")
 
                         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
                         entry_price = ticker["last"]
