@@ -155,6 +155,13 @@ class RiskEngine:
             )
 
         real_balance = self._get_real_usdt_balance()
+        if real_balance < 1.0:
+            return RiskAssessment(
+                approved=False, position_size_usd=0, stop_loss_price=0,
+                take_profit_price=None, risk_reward_ratio=0, max_loss_usd=0,
+                reasoning=f"Insufficient USDT balance: ${real_balance:.2f}", bucket=bot_type,
+            )
+
         allocation = await self.get_bucket_allocation()
 
         bucket_map = {
@@ -194,6 +201,7 @@ class RiskEngine:
         stop_loss = self.calculate_stop_loss(entry_price, side, atr, sl_multiplier)
         position_size = self.calculate_position_size(available, risk_pct, entry_price, stop_loss, fee_rate)
         position_size = min(position_size, available)
+        position_size = min(position_size, real_balance * 0.95)
 
         max_per_trade = allocation.total_capital_usd * 0.35
         position_size = min(position_size, max_per_trade)

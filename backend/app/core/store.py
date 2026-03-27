@@ -80,7 +80,7 @@ class TradeStore:
                 self.trades = data.get("trades", [])
                 self.deposits = data.get("deposits", [])
                 self.withdrawals = data.get("withdrawals", [])
-                self.snapshots = data.get("snapshots", [])[-500:]
+                self.snapshots = data.get("snapshots", [])
                 self._next_id = data.get("next_id", 1)
                 self._running_balance = data.get("running_balance", 0.0)
                 logger.info(f"Loaded trade store: {len(self.trades)} trades, {len(self.deposits)} deposits, balance=${self._running_balance:.2f}")
@@ -94,7 +94,7 @@ class TradeStore:
                 "trades": self.trades,
                 "deposits": self.deposits,
                 "withdrawals": self.withdrawals,
-                "snapshots": self.snapshots[-500:],
+                "snapshots": self.snapshots,
                 "next_id": self._next_id,
                 "running_balance": self._running_balance,
             }
@@ -238,10 +238,12 @@ class TradeStore:
         if len(self.snapshots) % 20 == 0:
             self._save()
 
-    def get_portfolio_chart(self, limit: int = 200) -> list[dict]:
+    def get_portfolio_chart(self, limit: int = 0) -> list[dict]:
         if not self.snapshots:
             return [{"timestamp": datetime.now(timezone.utc).isoformat(), "balance": round(self._running_balance, 2)}]
-        return self.snapshots[-limit:]
+        if limit > 0:
+            return self.snapshots[-limit:]
+        return list(self.snapshots)
 
     def get_ledger(self) -> list[dict]:
         ledger = []

@@ -167,7 +167,7 @@ function Dashboard({ activeAccount, setActiveAccount, accounts, reloadAccounts }
         getAccountingSummary(activeAccount),
         getRiskStatus(),
         getBotStatus(activeAccount),
-        getPortfolioChart(2000, activeAccount),
+        getPortfolioChart(0, activeAccount),
         getBotsRunning(activeAccount),
         getArbStatus(),
         getLiveBalance(activeAccount),

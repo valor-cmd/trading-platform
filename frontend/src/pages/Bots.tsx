@@ -3,6 +3,7 @@ import {
   getBotStatus, getBotsRunning, startBots, stopBots,
   getArbOpportunities, getArbStatus, getExchangesStatus,
   getExchangePairs, startAccountBots, stopAccountBots,
+  getBacktestStatus,
 } from "../services/api";
 
 interface BotTrade {
@@ -209,15 +210,17 @@ function Bots({ activeAccount, setActiveAccount, accounts }: BotsProps) {
   const [commonPairs, setCommonPairs] = useState(0);
   const [running, setRunning] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
+  const [backtestData, setBacktestData] = useState<Record<string, { symbol: string; side: string; win_rate: number; approved: boolean; total_trades: number }[]>>({});
 
   const load = async () => {
     try {
-      const [botRes, runRes, arbStatRes, arbOppRes, exRes] = await Promise.all([
+      const [botRes, runRes, arbStatRes, arbOppRes, exRes, btRes] = await Promise.all([
         getBotStatus(activeAccount),
         getBotsRunning(activeAccount),
         getArbStatus(),
         getArbOpportunities(0, 20),
         getExchangesStatus(),
+        getBacktestStatus().catch(() => ({ data: {} })),
       ]);
       setBots(botRes.data);
       setBotRunning(runRes.data);
@@ -227,6 +230,7 @@ function Bots({ activeAccount, setActiveAccount, accounts }: BotsProps) {
       setLivePrices(exRes.data.live_prices || {});
       setTotalSymbols(exRes.data.total_symbols || 0);
       setCommonPairs(exRes.data.common_pairs || 0);
+      setBacktestData(btRes.data || {});
       const anyRunning = Object.values(runRes.data).some((b: unknown) => {
         const bot = b as { running?: boolean };
         return bot?.running === true;
@@ -447,10 +451,22 @@ function Bots({ activeAccount, setActiveAccount, accounts }: BotsProps) {
                     <div className="text-sm text-secondary">{cfg.timeframes} · {cfg.interval}</div>
                   </div>
                 </div>
-                <span className={`badge ${isRunning ? "badge-active" : "badge-stopped"}`}>
-                  <span className="badge-dot" />
-                  {isRunning ? "Hunting" : "Idle"}
-                </span>
+                <div className="flex gap-sm" style={{ alignItems: "center" }}>
+                  {(() => {
+                    const bt = backtestData[botType] || [];
+                    const approved = bt.filter((b) => b.approved);
+                    const avgWr = approved.length > 0 ? approved.reduce((s, b) => s + b.win_rate, 0) / approved.length * 100 : 0;
+                    return bt.length > 0 ? (
+                      <span style={{ fontSize: "0.7rem", color: avgWr >= 51 ? "#00ff88" : "#ff4d6a", fontWeight: 600 }}>
+                        BT: {avgWr.toFixed(0)}% WR ({approved.length}/{bt.length})
+                      </span>
+                    ) : null;
+                  })()}
+                  <span className={`badge ${isRunning ? "badge-active" : "badge-stopped"}`}>
+                    <span className="badge-dot" />
+                    {isRunning ? "Hunting" : "Idle"}
+                  </span>
+                </div>
               </div>
 
               {bot?.trades && bot.trades.length > 0 ? (

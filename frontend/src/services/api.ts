@@ -84,6 +84,8 @@ export const getBotStatus = (account = "default") => api.get("/bots/status", { p
 
 export const getBotsRunning = (account = "default") => api.get("/bots/running", { params: { account } });
 
+export const getBacktestStatus = () => api.get("/bots/backtest-status");
+
 export const startBots = (exchangeId: string) => api.post(`/bots/start/${exchangeId}`);
 
 export const stopBots = () => api.post("/bots/stop");
@@ -118,7 +120,7 @@ export const searchTokens = (q = "") => api.get("/tokens/search", { params: { q 
 
 export const getTokensByChain = (chain: string) => api.get(`/tokens/by-chain/${chain}`);
 
-export const getPortfolioChart = (limit = 200, account = "default") => api.get("/portfolio/chart", { params: { limit, account } });
+export const getPortfolioChart = (limit = 0, account = "default") => api.get("/portfolio/chart", { params: { limit, account } });
 
 export const getLedger = (account = "default") => api.get("/accounting/ledger", { params: { account } });
 

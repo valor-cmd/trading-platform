@@ -332,6 +332,32 @@ async def bots_running(account: str = "default"):
     }
 
 
+@app.get("/api/bots/backtest-status")
+async def bots_backtest_status():
+    from app.indicators.backtest import _cache
+    import time as _time
+    result = {}
+    for key, (ts, br) in _cache.items():
+        parts = key.split(":")
+        if len(parts) >= 4:
+            symbol, bot_type, side, tf = parts[0], parts[1], parts[2], parts[3]
+            if bot_type not in result:
+                result[bot_type] = []
+            result[bot_type].append({
+                "symbol": symbol,
+                "side": side,
+                "timeframe": tf,
+                "win_rate": br.win_rate,
+                "total_trades": br.total_trades,
+                "wins": br.wins,
+                "losses": br.losses,
+                "approved": br.approved,
+                "reason": br.reason,
+                "age_seconds": round(_time.time() - ts),
+            })
+    return result
+
+
 @app.get("/api/exchanges/status")
 async def exchanges_status():
     return {
@@ -408,7 +434,7 @@ async def tokens_by_chain(chain: str):
 
 
 @app.get("/api/portfolio/chart")
-async def portfolio_chart(limit: int = 200, account: str = "default"):
+async def portfolio_chart(limit: int = 0, account: str = "default"):
     from app.core.accounts import account_manager
     try:
         acct = account_manager.get(account)

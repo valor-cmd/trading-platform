@@ -437,6 +437,22 @@ class BaseBot(ABC):
                             continue
 
                         if assessment.approved:
+                            usdt_balance = self.exchange.balances.get("USDT", 0)
+                            if side == "buy":
+                                needed = assessment.position_size_usd * 1.002
+                                if usdt_balance < needed:
+                                    self._last_scan_results[symbol] = f"insufficient USDT: ${usdt_balance:.2f} < ${needed:.2f}"
+                                    await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
+                                    continue
+                            else:
+                                base_asset = symbol.split("/")[0]
+                                base_balance = self.exchange.balances.get(base_asset, 0)
+                                needed_amount = assessment.position_size_usd / entry_price if entry_price > 0 else 0
+                                if base_balance < needed_amount * 0.99:
+                                    self._last_scan_results[symbol] = f"insufficient {base_asset}: {base_balance:.6f} < {needed_amount:.6f}"
+                                    await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
+                                    continue
+
                             sl_pct = abs(entry_price - assessment.stop_loss_price) / entry_price * 100 if entry_price > 0 else 0
                             if sl_pct < spread_pct * 2:
                                 self._last_scan_results[symbol] = f"SL too tight vs spread: SL={sl_pct:.3f}% < 2*spread={spread_pct*2:.3f}%"
