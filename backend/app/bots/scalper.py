@@ -8,7 +8,7 @@ class ScalperBot(BaseBot):
         super().__init__(BotType.SCALPER, exchange_manager, risk_engine, sentiment_analyzer)
 
     def get_timeframes(self) -> list[str]:
-        return ["5m", "15m"]
+        return ["5m", "15m", "1h"]
 
     def get_symbols(self) -> list[str]:
         return self._get_all_tradable_symbols()

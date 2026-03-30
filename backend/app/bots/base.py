@@ -140,6 +140,18 @@ class BaseBot(ABC):
         self._best_prices: dict[str, float] = {}
         self._consecutive_errors = 0
 
+    async def _sync_active_trades(self):
+        ts = self._get_trade_store()
+        kv = self._get_kv_store()
+        store_open = ts.get_open_trades()
+        store_ids = {str(ot.get("id", "")) for ot in store_open if ot.get("bot_type") == self.bot_type.value}
+        stale = [t for t in self.active_trades if t.get("order_id") not in store_ids]
+        for t in stale:
+            self.active_trades.remove(t)
+            await kv.hdel(f"active_trades:{self.bot_type.value}", t["order_id"])
+        if stale:
+            logger.info(f"{self.bot_type.value} cleared {len(stale)} stale trades after account sync")
+
     async def resume_open_trades(self):
         ts = self._get_trade_store()
         kv = self._get_kv_store()
@@ -282,6 +294,12 @@ class BaseBot(ABC):
     async def run_cycle(self, exchange_id: str):
         self._cycle_count += 1
 
+        if self._cycle_count % 5 == 1:
+            try:
+                await self._sync_active_trades()
+            except Exception:
+                pass
+
         if self._account and self._account.check_daily_target():
             if self._cycle_count % 60 == 1:
                 logger.info(f"{self.bot_type.value} daily target hit for account '{self._account.config.name}' -- skipping new trades")
@@ -343,7 +361,8 @@ class BaseBot(ABC):
 
         for symbol in symbols:
             try:
-                tf = self.get_timeframes()[0]
+                all_tfs = self.get_timeframes()
+                tf = all_tfs[0]
                 df = await self.exchange.fetch_ohlcv(exchange_id, symbol, tf)
                 if len(df) < 50:
                     continue
@@ -401,16 +420,26 @@ class BaseBot(ABC):
                                 confirmation_rejections += 1
                             continue
 
-                        try:
-                            bt_result = await check_historical_win_rate(
-                                self.exchange, exchange_id, symbol,
-                                self.bot_type.value, side, tf,
-                            )
-                            if not bt_result.approved:
-                                self._last_scan_results[symbol] = f"backtest rejected: {bt_result.reason}"
-                                continue
-                        except Exception as bt_err:
-                            logger.debug(f"{self.bot_type.value} backtest failed for {symbol}: {bt_err}")
+                        best_bt = None
+                        best_tf = tf
+                        for try_tf in all_tfs:
+                            try:
+                                bt_result = await check_historical_win_rate(
+                                    self.exchange, exchange_id, symbol,
+                                    self.bot_type.value, side, try_tf,
+                                )
+                                if bt_result.approved:
+                                    if best_bt is None or bt_result.win_rate > best_bt.win_rate:
+                                        best_bt = bt_result
+                                        best_tf = try_tf
+                            except Exception:
+                                pass
+
+                        if best_bt is None:
+                            self._last_scan_results[symbol] = f"backtest rejected on all timeframes {all_tfs}"
+                            continue
+
+                        tf = best_tf
 
                         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
                         entry_price = ticker["last"]

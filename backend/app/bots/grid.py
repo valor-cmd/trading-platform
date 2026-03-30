@@ -14,7 +14,7 @@ class GridBot(BaseBot):
         super().__init__(BotType.GRID, exchange, risk_engine, sentiment_analyzer)
 
     def get_timeframes(self) -> list[str]:
-        return ["1h", "4h"]
+        return ["15m", "1h", "4h"]
 
     def get_symbols(self) -> list[str]:
         return self._get_all_tradable_symbols()

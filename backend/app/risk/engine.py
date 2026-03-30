@@ -186,10 +186,10 @@ class RiskEngine:
             )
 
         risk_pct_map = {
-            "scalper": 5.0, "swing": 5.0, "long_term": 5.0,
-            "grid": 2.0, "mean_reversion": 3.0, "momentum": 5.0, "dca": 3.0,
+            "scalper": 15.0, "swing": 20.0, "long_term": 20.0,
+            "grid": 10.0, "mean_reversion": 15.0, "momentum": 20.0, "dca": 15.0,
         }
-        base_risk = risk_pct_map.get(bot_type, 5.0)
+        base_risk = risk_pct_map.get(bot_type, 15.0)
         risk_pct = base_risk * min(max(signal_confidence, 0.5), 1.0)
 
         sl_multiplier_map = {
@@ -203,7 +203,7 @@ class RiskEngine:
         position_size = min(position_size, available)
         position_size = min(position_size, real_balance * 0.95)
 
-        max_per_trade = allocation.total_capital_usd * 0.35
+        max_per_trade = allocation.total_capital_usd * 0.40
         position_size = min(position_size, max_per_trade)
 
         min_pos = 1.0

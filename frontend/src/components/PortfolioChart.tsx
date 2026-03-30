@@ -162,7 +162,7 @@ export default function PortfolioChart({
     if (!seriesRef.current || !chartRef.current) return;
 
     if (mode === "candle") {
-      const bucketMs = 300_000;
+      const bucketMs = RANGE_MS[timeRange] > 0 ? RANGE_MS[timeRange] : 3600_000;
       const buckets = new Map<number, { o: number; h: number; l: number; c: number }>();
       for (const pt of data) {
         const ts = Math.floor(new Date(pt.timestamp).getTime() / bucketMs) * bucketMs;
