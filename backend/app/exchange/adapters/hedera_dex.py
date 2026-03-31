@@ -24,6 +24,7 @@ def _is_valid_symbol(sym: str) -> bool:
 
 HEDERA_MIRROR_NODE = "https://mainnet.mirrornode.hedera.com"
 SAUCERSWAP_API = "https://api.saucerswap.finance"
+SAUCERSWAP_V2_API = "https://api.saucerswap.finance/v2"
 
 WELL_KNOWN_HEDERA_TOKENS = {
     "0.0.456858": {"symbol": "USDC", "name": "USD Coin", "decimals": 6, "tags": ["stablecoin"]},
@@ -165,7 +166,7 @@ class HederaDEXAdapter(BaseExchangeAdapter):
                 async with session.get(
                     f"{SAUCERSWAP_API}/tokens",
                     timeout=aiohttp.ClientTimeout(total=10),
-                    headers={"Accept": "application/json"},
+                    headers={"Accept": "application/json", "User-Agent": "TradingPlatform/1.0"},
                 ) as resp:
                     if resp.status == 200:
                         tokens = await resp.json()
@@ -181,6 +182,9 @@ class HederaDEXAdapter(BaseExchangeAdapter):
                                     pass
                         self._saucerswap_available = True
                         logger.info(f"Loaded {len(self._price_cache)} prices from SaucerSwap")
+                    elif resp.status == 401:
+                        logger.warning("SaucerSwap API requires auth — using CEX fallback prices")
+                        self._saucerswap_available = False
                     else:
                         logger.warning(f"SaucerSwap tokens returned {resp.status}")
         except Exception as e:

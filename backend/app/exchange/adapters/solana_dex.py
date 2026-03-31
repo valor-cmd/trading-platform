@@ -124,6 +124,9 @@ class SolanaDEXAdapter(BaseExchangeAdapter):
                         timeout=aiohttp.ClientTimeout(total=30),
                         headers={"User-Agent": "TradingPlatform/1.0", "Accept": "application/json"},
                     ) as resp:
+                        if resp.status == 401:
+                            logger.warning(f"Jupiter {url} requires auth — using hardcoded tokens")
+                            continue
                         if resp.status == 200:
                             tokens = await resp.json()
                             count = 0
@@ -166,6 +169,8 @@ class SolanaDEXAdapter(BaseExchangeAdapter):
 
     async def _fetch_jupiter_prices(self, mints: list[str]) -> dict[str, float]:
         results = {}
+        if not self._jupiter_available:
+            return results
         try:
             batch_size = 100
             for i in range(0, len(mints), batch_size):
@@ -177,6 +182,10 @@ class SolanaDEXAdapter(BaseExchangeAdapter):
                         timeout=aiohttp.ClientTimeout(total=10),
                         headers={"User-Agent": "TradingPlatform/1.0", "Accept": "application/json"},
                     ) as resp:
+                        if resp.status == 401:
+                            logger.debug("Jupiter price API requires auth — using CEX fallback")
+                            self._jupiter_available = False
+                            return results
                         if resp.status == 200:
                             data = await resp.json()
                             price_data = data.get("data", {})

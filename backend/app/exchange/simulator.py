@@ -58,15 +58,16 @@ class PaperExchangeManager:
         return exchange_id in self.connected_exchanges
 
     def get_all_symbols(self) -> list[str]:
-        symbols = live_prices.get_symbols(self._primary_exchange)
-        if symbols:
-            return symbols
+        all_syms = set()
         for eid in live_prices.get_exchanges():
-            symbols = live_prices.get_symbols(eid)
-            if symbols:
-                self._primary_exchange = eid
-                return symbols
-        return []
+            all_syms.update(live_prices.get_symbols(eid))
+        if not all_syms:
+            return []
+        if not any(eid == self._primary_exchange for eid in live_prices.get_exchanges()):
+            exchanges = live_prices.get_exchanges()
+            if exchanges:
+                self._primary_exchange = exchanges[0]
+        return list(all_syms)
 
     def get_symbols_for_exchange(self, exchange_id: str) -> list[str]:
         return live_prices.get_symbols(exchange_id)
