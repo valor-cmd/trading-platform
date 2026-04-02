@@ -490,6 +490,8 @@ class BaseBot(ABC):
                             await self.execute_trade(
                                 exchange_id, symbol, signal, assessment,
                                 fee_rate, side, confirmation,
+                                backtest_win_rate=best_bt.win_rate if best_bt else 0.0,
+                                backtest_timeframe=best_tf,
                             )
                             trades_opened += 1
                             self._record_cooldown(symbol)
@@ -630,6 +632,8 @@ class BaseBot(ABC):
         self, exchange_id: str, symbol: str, signal: SignalResult,
         assessment: RiskAssessment, fee_rate: float, side: str,
         confirmation: Optional[ConfirmationResult] = None,
+        backtest_win_rate: float = 0.0,
+        backtest_timeframe: str = "",
     ):
         ticker = await self.exchange.fetch_ticker(exchange_id, symbol)
         amount = assessment.position_size_usd / ticker["last"]
@@ -667,6 +671,8 @@ class BaseBot(ABC):
             "strategy": strategy_desc,
             "signal_score": signal_score,
             "confirmations": confirmation.confirmations if confirmation else [],
+            "backtest_win_rate": backtest_win_rate,
+            "backtest_timeframe": backtest_timeframe,
         }
         self.active_trades.append(trade)
 
@@ -694,6 +700,8 @@ class BaseBot(ABC):
             "strategy": strategy_desc,
             "signal_score": signal_score,
             "signal_confidence": signal.confidence,
+            "backtest_win_rate": backtest_win_rate,
+            "backtest_timeframe": backtest_timeframe,
         })
 
         await kv.hset(
