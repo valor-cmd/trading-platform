@@ -199,6 +199,13 @@ class RiskEngine:
         sl_multiplier = sl_multiplier_map.get(bot_type, 1.5)
 
         stop_loss = self.calculate_stop_loss(entry_price, side, atr, sl_multiplier)
+        max_sl_pct = 0.015
+        sl_distance_pct = abs(entry_price - stop_loss) / entry_price if entry_price > 0 else 0
+        if sl_distance_pct > max_sl_pct:
+            if side == "buy":
+                stop_loss = entry_price * (1 - max_sl_pct)
+            else:
+                stop_loss = entry_price * (1 + max_sl_pct)
         position_size = self.calculate_position_size(available, risk_pct, entry_price, stop_loss, fee_rate)
         position_size = min(position_size, available)
         position_size = min(position_size, real_balance * 0.95)
