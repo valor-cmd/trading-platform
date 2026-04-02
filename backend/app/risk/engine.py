@@ -199,7 +199,11 @@ class RiskEngine:
         sl_multiplier = sl_multiplier_map.get(bot_type, 1.5)
 
         stop_loss = self.calculate_stop_loss(entry_price, side, atr, sl_multiplier)
-        max_sl_pct = 0.015
+        max_sl_pct_map = {
+            "scalper": 0.015, "swing": 0.03, "long_term": 0.05,
+            "grid": 0.025, "mean_reversion": 0.025, "momentum": 0.03, "dca": 0.03,
+        }
+        max_sl_pct = max_sl_pct_map.get(bot_type, 0.025)
         sl_distance_pct = abs(entry_price - stop_loss) / entry_price if entry_price > 0 else 0
         if sl_distance_pct > max_sl_pct:
             if side == "buy":
