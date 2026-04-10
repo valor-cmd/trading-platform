@@ -806,6 +806,27 @@ async def start_account_bots(name: str, _auth=Depends(require_auth)):
     return {"status": "started", "account": name, "bots": list(bots_map.keys())}
 
 
+@router.get("/learning/stats")
+async def learning_stats(_auth=Depends(require_auth)):
+    from app.learning.autopsy import adaptive_memory
+    stats = adaptive_memory.get_stats()
+    return stats
+
+
+@router.get("/learning/autopsies")
+async def learning_autopsies(limit: int = 20, _auth=Depends(require_auth)):
+    from app.learning.autopsy import adaptive_memory
+    autopsies = adaptive_memory.autopsies[-limit:]
+    autopsies.reverse()
+    return {"autopsies": autopsies, "total": len(adaptive_memory.autopsies)}
+
+
+@router.get("/learning/adjustments")
+async def learning_adjustments(_auth=Depends(require_auth)):
+    from app.learning.autopsy import adaptive_memory
+    return {"adjustments": adaptive_memory.adjustments}
+
+
 @router.post("/accounts/{name}/stop-bots")
 async def stop_account_bots(name: str, _auth=Depends(require_auth)):
     acct = _resolve_account(name)

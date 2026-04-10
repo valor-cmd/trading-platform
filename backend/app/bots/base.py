@@ -19,6 +19,7 @@ from app.indicators.confirmation import evaluate_confirmation, ConfirmationResul
 from app.indicators.backtest import check_historical_win_rate
 from app.risk.engine import RiskEngine, RiskAssessment
 from app.models.trade import BotType
+from app.learning.autopsy import perform_autopsy, adaptive_memory
 
 logger = logging.getLogger(__name__)
 
@@ -404,6 +405,42 @@ class BaseBot(ABC):
                     if await self.evaluate_entry(symbol, signal, sentiment_interp):
                         side = self._determine_side(signal)
 
+                        adj = adaptive_memory.get_adjustment(self.bot_type.value, symbol)
+                        if adj.sample_size >= 3:
+                            regime_str = signal.regime.regime.value if signal.regime else ""
+                            if regime_str in adj.avoid_regimes:
+                                self._last_scan_results[symbol] = f"learning: avoid regime {regime_str}"
+                                continue
+                            if adj.min_confidence_adj > 0:
+                                effective_min = min_conf + adj.min_confidence_adj
+                                if signal.confidence < effective_min:
+                                    self._last_scan_results[symbol] = f"learning: conf {signal.confidence:.3f} < {effective_min:.3f}"
+                                    continue
+                            if adj.require_macd_alignment:
+                                macd_ok = (side == "buy" and signal.macd_signal in ("bullish", "bullish_crossover")) or \
+                                          (side == "sell" and signal.macd_signal in ("bearish", "bearish_crossover"))
+                                if not macd_ok:
+                                    self._last_scan_results[symbol] = "learning: MACD not aligned"
+                                    continue
+                            if adj.require_ema_alignment:
+                                ema_ok = (side == "buy" and signal.ema_trend in ("bullish", "strong_bullish")) or \
+                                         (side == "sell" and signal.ema_trend in ("bearish", "strong_bearish"))
+                                if not ema_ok:
+                                    self._last_scan_results[symbol] = "learning: EMA not aligned"
+                                    continue
+                            if adj.min_volume_trend == "high" and signal.volume_trend in ("low", "normal"):
+                                self._last_scan_results[symbol] = "learning: volume too low"
+                                continue
+                            if adj.min_adx > 0 and signal.adx < adj.min_adx:
+                                self._last_scan_results[symbol] = f"learning: ADX {signal.adx:.1f} < {adj.min_adx:.1f}"
+                                continue
+                            if side == "buy" and adj.max_rsi_buy > 0 and signal.rsi is not None and signal.rsi > adj.max_rsi_buy:
+                                self._last_scan_results[symbol] = f"learning: RSI {signal.rsi:.1f} > max {adj.max_rsi_buy:.1f} for buy"
+                                continue
+                            if side == "sell" and adj.min_rsi_sell > 0 and signal.rsi is not None and signal.rsi < adj.min_rsi_sell:
+                                self._last_scan_results[symbol] = f"learning: RSI {signal.rsi:.1f} < min {adj.min_rsi_sell:.1f} for sell"
+                                continue
+
                         confirmation = evaluate_confirmation(
                             self.bot_type.value, signal, sentiment_interp, side,
                         )
@@ -460,6 +497,32 @@ class BaseBot(ABC):
                             self.bot_type.value, entry_price, side,
                             signal.atr, signal.confidence, fee_rate,
                         )
+
+                        if assessment.approved and adj.sample_size >= 3 and signal.atr and signal.atr > 0:
+                            if adj.sl_atr_mult_adj != 0:
+                                sl_shift = signal.atr * adj.sl_atr_mult_adj
+                                if side == "buy":
+                                    assessment.stop_loss_price = max(
+                                        assessment.stop_loss_price + sl_shift,
+                                        entry_price * 0.95,
+                                    )
+                                else:
+                                    assessment.stop_loss_price = min(
+                                        assessment.stop_loss_price - sl_shift,
+                                        entry_price * 1.05,
+                                    )
+                            if adj.tp_atr_mult_adj != 0:
+                                tp_shift = signal.atr * adj.tp_atr_mult_adj
+                                if side == "buy":
+                                    assessment.take_profit_price = max(
+                                        assessment.take_profit_price + tp_shift,
+                                        entry_price * 1.002,
+                                    )
+                                else:
+                                    assessment.take_profit_price = min(
+                                        assessment.take_profit_price - tp_shift,
+                                        entry_price * 0.998,
+                                    )
 
                         if assessment.approved and assessment.position_size_usd < MIN_POSITION_USD:
                             self._last_scan_results[symbol] = f"position too small: ${assessment.position_size_usd:.2f} < ${MIN_POSITION_USD}"
@@ -763,6 +826,33 @@ class BaseBot(ABC):
             f"{self.bot_type.value} CLOSED {trade['symbol']} @ ${exit_price:.8g} "
             f"gross=${gross_pnl:.5f} fees=${total_fees:.5f} net=${net_pnl:.5f} ({status})"
         )
+
+        try:
+            closed_record = None
+            for ot in ts.get_closed_trades():
+                if ot.get("symbol") == trade["symbol"] and ot.get("bot_type") == self.bot_type.value:
+                    closed_record = ot
+            if closed_record:
+                entry_df = None
+                exit_df = None
+                try:
+                    exit_df = await self.exchange.fetch_ohlcv(exchange_id, trade["symbol"], "1h", 200)
+                except Exception:
+                    pass
+                autopsy_result = perform_autopsy(
+                    {**closed_record, **trade},
+                    entry_df,
+                    exit_df,
+                )
+                adaptive_memory.record_autopsy(autopsy_result)
+                findings_count = len(autopsy_result.findings)
+                if findings_count > 0:
+                    logger.info(
+                        f"AUTOPSY [{trade['symbol']}] {findings_count} findings, "
+                        f"optimal_pnl={autopsy_result.optimal_pnl_pct:.1f}%"
+                    )
+        except Exception as e:
+            logger.debug(f"Autopsy failed for {trade.get('symbol', '?')}: {e}")
 
     async def start(self, exchange_id: str, interval_seconds: int):
         self.running = True
