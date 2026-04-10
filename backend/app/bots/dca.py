@@ -28,81 +28,87 @@ class DCABot(BaseBot):
         if regime and regime.regime == MarketRegime.CHAOTIC:
             return False
 
-        if regime and regime.regime == MarketRegime.STRONG_TREND_DOWN:
-            return False
-
-        if regime and regime.regime == MarketRegime.TREND_DOWN:
-            if signal.adx >= 25:
-                return False
-
-        if signal.overall_signal in ("sell", "strong_sell"):
-            if signal.ema_trend in ("bearish", "strong_bearish"):
-                return False
-
         if signal.confidence < 0.15:
             return False
 
+        is_bearish = signal.overall_signal in ("sell", "strong_sell")
+
         score = 0.0
 
-        if signal.rsi is not None and signal.rsi < 25:
-            score += 3.5
-        elif signal.rsi is not None and signal.rsi < 30:
-            score += 2.5
-        elif signal.rsi is not None and signal.rsi < 35:
-            score += 1.5
-
-        if signal.bollinger_signal == "oversold":
-            score += 2.5
-
-        if signal.ema_trend in ("bullish", "strong_bullish"):
-            score += 2.5
-        elif signal.ema_trend == "neutral":
-            score += 0.5
-        elif signal.ema_trend == "bearish":
-            score -= 1.0
-        elif signal.ema_trend == "strong_bearish":
-            score -= 2.0
-
-        if signal.macd_signal in ("bullish", "bullish_crossover"):
-            score += 2.0
-        elif signal.macd_signal in ("bearish", "bearish_crossover"):
-            score -= 1.0
+        if is_bearish:
+            if signal.rsi is not None and signal.rsi > 75:
+                score += 3.5
+            elif signal.rsi is not None and signal.rsi > 70:
+                score += 2.5
+            elif signal.rsi is not None and signal.rsi > 65:
+                score += 1.5
+            if signal.bollinger_signal == "overbought":
+                score += 2.5
+            if signal.ema_trend in ("bearish", "strong_bearish"):
+                score += 2.5
+            elif signal.ema_trend == "neutral":
+                score += 0.5
+            if signal.macd_signal in ("bearish", "bearish_crossover"):
+                score += 2.0
+            if signal.mfi > 80:
+                score += 1.5
+            elif signal.mfi > 70:
+                score += 1.0
+            if signal.obv_trend == "bearish":
+                score += 1.0
+            if signal.stoch_rsi_k > 85:
+                score += 1.5
+            elif signal.stoch_rsi_k > 75:
+                score += 0.5
+            if signal.zscore > 2.0:
+                score += 2.0
+            elif signal.zscore > 1.5:
+                score += 1.0
+            if signal.sr_proximity == "near_resistance":
+                score += 1.5
+            if signal.vwap_signal == "above":
+                score += 0.5
+        else:
+            if signal.rsi is not None and signal.rsi < 25:
+                score += 3.5
+            elif signal.rsi is not None and signal.rsi < 30:
+                score += 2.5
+            elif signal.rsi is not None and signal.rsi < 35:
+                score += 1.5
+            if signal.bollinger_signal == "oversold":
+                score += 2.5
+            if signal.ema_trend in ("bullish", "strong_bullish"):
+                score += 2.5
+            elif signal.ema_trend == "neutral":
+                score += 0.5
+            if signal.macd_signal in ("bullish", "bullish_crossover"):
+                score += 2.0
+            if signal.mfi < 20:
+                score += 1.5
+            elif signal.mfi < 30:
+                score += 1.0
+            if signal.obv_trend == "bullish":
+                score += 1.0
+            if signal.stoch_rsi_k < 15:
+                score += 1.5
+            elif signal.stoch_rsi_k < 25:
+                score += 0.5
+            if signal.zscore < -2.0:
+                score += 2.0
+            elif signal.zscore < -1.5:
+                score += 1.0
+            if signal.sr_proximity == "near_support":
+                score += 1.5
+            if signal.vwap_signal == "below":
+                score += 0.5
 
         if signal.volume_trend in ("high", "very_high"):
             score += 1.0
 
-        if signal.mfi < 20:
-            score += 1.5
-        elif signal.mfi < 30:
-            score += 1.0
-
-        if signal.obv_trend == "bullish":
-            score += 1.0
-        elif signal.obv_trend == "bearish":
-            score -= 0.5
-
-        if signal.stoch_rsi_k < 15:
-            score += 1.5
-        elif signal.stoch_rsi_k < 25:
-            score += 0.5
-
-        if signal.zscore < -2.0:
-            score += 2.0
-        elif signal.zscore < -1.5:
-            score += 1.0
-
-        if signal.sr_proximity == "near_support":
-            score += 1.5
-        elif signal.sr_proximity == "near_resistance":
-            score -= 1.0
-
-        if signal.vwap_signal == "below":
-            score += 0.5
-
         sentiment_bias = sentiment.get("bias", "neutral")
-        if sentiment_bias in ("contrarian_buy",):
+        if sentiment_bias in ("contrarian_buy", "contrarian_sell"):
             score += 2.0
-        elif sentiment_bias in ("lean_buy",):
+        elif sentiment_bias in ("lean_buy", "lean_sell"):
             score += 1.0
 
         if regime and regime.regime == MarketRegime.RANGING:

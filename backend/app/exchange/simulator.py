@@ -131,28 +131,50 @@ class PaperExchangeManager:
         fee_rate = await self.get_trading_fee(exchange_id, symbol)
 
         if side == "buy":
+            current_base = self.balances.get(base, 0)
+            is_closing_short = current_base < 0
             cost = amount * fill_price
             fee = cost * fee_rate
-            required = cost + fee
-            available_quote = self.balances.get(quote, 0)
-            if available_quote < required:
-                if available_quote < 1.0:
-                    raise ValueError(f"Insufficient {quote} balance: have {available_quote:.4f}, need {required:.4f}")
-                amount = (available_quote * 0.999) / (fill_price * (1 + fee_rate))
-                cost = amount * fill_price
-                fee = cost * fee_rate
-            self.balances[quote] = self.balances.get(quote, 0) - cost - fee
-            self.balances[base] = self.balances.get(base, 0) + amount
+
+            if is_closing_short:
+                close_amount = min(amount, -current_base)
+                close_cost = close_amount * fill_price
+                close_fee = close_cost * fee_rate
+                self.balances[base] = current_base + close_amount
+                self.balances[quote] = self.balances.get(quote, 0) - close_cost - close_fee
+                cost = close_cost
+                fee = close_fee
+            else:
+                required = cost + fee
+                available_quote = self.balances.get(quote, 0)
+                if available_quote < required:
+                    if available_quote < 1.0:
+                        raise ValueError(f"Insufficient {quote} balance: have {available_quote:.4f}, need {required:.4f}")
+                    amount = (available_quote * 0.999) / (fill_price * (1 + fee_rate))
+                    cost = amount * fill_price
+                    fee = cost * fee_rate
+                self.balances[quote] = self.balances.get(quote, 0) - cost - fee
+                self.balances[base] = self.balances.get(base, 0) + amount
         else:
             available_base = self.balances.get(base, 0)
-            if available_base < amount:
-                amount = available_base
-            if amount <= 0:
-                raise ValueError(f"Insufficient {base} balance for sell")
-            revenue = amount * fill_price
-            fee = revenue * fee_rate
-            self.balances[base] = self.balances.get(base, 0) - amount
-            self.balances[quote] = self.balances.get(quote, 0) + revenue - fee
+            if available_base >= amount:
+                revenue = amount * fill_price
+                fee = revenue * fee_rate
+                self.balances[base] = self.balances.get(base, 0) - amount
+                self.balances[quote] = self.balances.get(quote, 0) + revenue - fee
+            else:
+                proceeds = amount * fill_price
+                fee = proceeds * fee_rate
+                available_quote = self.balances.get(quote, 0)
+                if available_quote < fee:
+                    if available_quote < 1.0:
+                        raise ValueError(f"Insufficient {quote} for short fee: have {available_quote:.4f}")
+                    amount = (available_quote * 0.999 / fee_rate) / fill_price
+                    proceeds = amount * fill_price
+                    fee = proceeds * fee_rate
+                self.balances[quote] = self.balances.get(quote, 0) + proceeds - fee
+                self.balances[base] = self.balances.get(base, 0) - amount
+                revenue = proceeds
 
         slippage_usd = abs(fill_price - price) * amount
         self._save()

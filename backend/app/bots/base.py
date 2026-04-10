@@ -467,20 +467,11 @@ class BaseBot(ABC):
 
                         if assessment.approved:
                             usdt_balance = self.exchange.balances.get("USDT", 0)
-                            if side == "buy":
-                                needed = assessment.position_size_usd * 1.002
-                                if usdt_balance < needed:
-                                    self._last_scan_results[symbol] = f"insufficient USDT: ${usdt_balance:.2f} < ${needed:.2f}"
-                                    await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
-                                    continue
-                            else:
-                                base_asset = symbol.split("/")[0]
-                                base_balance = self.exchange.balances.get(base_asset, 0)
-                                needed_amount = assessment.position_size_usd / entry_price if entry_price > 0 else 0
-                                if base_balance < needed_amount * 0.99:
-                                    self._last_scan_results[symbol] = f"insufficient {base_asset}: {base_balance:.6f} < {needed_amount:.6f}"
-                                    await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
-                                    continue
+                            needed = assessment.position_size_usd * 1.002
+                            if usdt_balance < needed:
+                                self._last_scan_results[symbol] = f"insufficient USDT: ${usdt_balance:.2f} < ${needed:.2f}"
+                                await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
+                                continue
 
                             sl_pct = abs(entry_price - assessment.stop_loss_price) / entry_price * 100 if entry_price > 0 else 0
                             if sl_pct < spread_pct * 2:
@@ -547,8 +538,22 @@ class BaseBot(ABC):
                     except Exception:
                         pass
 
-                    if atr_val > 0 and hold_seconds > MIN_HOLD_SECONDS.get(self.bot_type.value, 300):
+                    if atr_val > 0:
                         best = self._best_prices[order_id]
+                        entry_p = trade["entry_price"]
+                        if entry_p > 0:
+                            if trade["side"] == "buy":
+                                profit_pct = (best - entry_p) / entry_p
+                            else:
+                                profit_pct = (entry_p - best) / entry_p
+                        else:
+                            profit_pct = 0
+                        if profit_pct > 0.02:
+                            trail_mult *= 0.5
+                        elif profit_pct > 0.01:
+                            trail_mult *= 0.7
+                        elif profit_pct > 0.005:
+                            trail_mult *= 0.85
                         if trade["side"] == "buy":
                             new_trail = best - (atr_val * trail_mult)
                             old_trail = self._trailing_stops.get(order_id, trade["stop_loss"])
