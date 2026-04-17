@@ -200,7 +200,7 @@ def simulate_trades_on_history(
     wr = wins / total
     avg_win = sum(win_pcts) / len(win_pcts) if win_pcts else 0
     avg_loss = sum(loss_pcts) / len(loss_pcts) if loss_pcts else 0
-    approved = wr >= 0.55
+    approved = wr >= 0.75
 
     return BacktestResult(
         win_rate=round(wr, 4),
@@ -211,7 +211,7 @@ def simulate_trades_on_history(
         avg_loss_pct=round(avg_loss, 3),
         approved=approved,
         reason=f"Backtest WR={wr*100:.1f}% ({wins}W/{losses}L) avg_win={avg_win:.2f}% avg_loss={avg_loss:.2f}%"
-            + (" APPROVED" if approved else " REJECTED (<51%)"),
+            + (" APPROVED" if approved else " REJECTED (<75%)"),
     )
 
 

@@ -55,7 +55,7 @@ MAX_OPEN_TRADES = {
     "momentum": 6,
     "dca": 8,
 }
-GLOBAL_MAX_OPEN = 60
+GLOBAL_MAX_OPEN = 10
 SYMBOL_COOLDOWN_SECONDS = {
     "scalper": 600,
     "swing": 3600,
@@ -315,7 +315,6 @@ class BaseBot(ABC):
             try:
                 ts = self._get_trade_store()
                 pe = self.exchange
-                usdt = pe.balances.get("USDT", 0)
                 open_trades = ts.get_open_trades()
                 open_by_bot: dict[str, float] = {}
                 for ot in open_trades:
@@ -330,7 +329,9 @@ class BaseBot(ABC):
                         if cv and sym in ck and cv.get("last", 0) > 0:
                             open_by_bot[bt] = open_by_bot.get(bt, 0) - (ot.get("entry_price", 0) * qty) + (cv["last"] * qty)
                             break
-                total_cap = usdt + sum(open_by_bot.values())
+                net_deposits = ts.total_deposits() - ts.total_withdrawals()
+                realized_pnl = ts.total_pnl().get("total_pnl_usd", 0)
+                total_cap = max(net_deposits + realized_pnl, 1.0)
                 if total_cap > 1:
                     await self.risk.rebalance_buckets(total_cap, open_by_bot)
             except Exception as e:
@@ -532,9 +533,16 @@ class BaseBot(ABC):
                             usdt_balance = self.exchange.balances.get("USDT", 0)
                             needed = assessment.position_size_usd * 1.002
                             if usdt_balance < needed:
-                                self._last_scan_results[symbol] = f"insufficient USDT: ${usdt_balance:.2f} < ${needed:.2f}"
-                                await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
-                                continue
+                                displaced = await self._try_displace_trade(
+                                    exchange_id, needed, best_bt.win_rate if best_bt else 0,
+                                )
+                                if displaced:
+                                    usdt_balance = self.exchange.balances.get("USDT", 0)
+                                    trades_closed += displaced
+                                if usdt_balance < needed:
+                                    self._last_scan_results[symbol] = f"insufficient USDT: ${usdt_balance:.2f} < ${needed:.2f}"
+                                    await self.risk.release_bucket(self.bot_type.value, assessment.position_size_usd)
+                                    continue
 
                             sl_pct = abs(entry_price - assessment.stop_loss_price) / entry_price * 100 if entry_price > 0 else 0
                             if sl_pct < spread_pct * 2:
@@ -695,6 +703,99 @@ class BaseBot(ABC):
                 f"closed {trades_closed}, active {len(self.active_trades)}, "
                 f"regime_blocked={regime_rejections}, conf_blocked={confirmation_rejections}"
             )
+
+    async def _try_displace_trade(
+        self, exchange_id: str, cash_needed: float, new_wr: float,
+    ) -> int:
+        ts = self._get_trade_store()
+        open_trades = ts.get_open_trades()
+
+        candidates = []
+        for ot in open_trades:
+            ot_wr = ot.get("backtest_win_rate", 0) or 0
+            if ot_wr >= new_wr:
+                continue
+            sym = ot.get("symbol", "")
+            entry_p = ot.get("entry_price", 0)
+            qty = ot.get("quantity", 0)
+            side = ot.get("side", "buy")
+            if entry_p <= 0 or qty <= 0:
+                continue
+            try:
+                ticker = await self.exchange.fetch_ticker(exchange_id, sym)
+                current_price = ticker["last"]
+            except Exception:
+                continue
+            if side == "buy":
+                pnl_pct = (current_price - entry_p) / entry_p
+            else:
+                pnl_pct = (entry_p - current_price) / entry_p
+            if pnl_pct <= 0:
+                continue
+            candidates.append({
+                "trade": ot,
+                "wr": ot_wr,
+                "pnl_pct": pnl_pct,
+                "current_price": current_price,
+                "active_ref": None,
+            })
+
+        if not candidates:
+            return 0
+
+        candidates.sort(key=lambda c: c["wr"])
+
+        displaced = 0
+        for cand in candidates:
+            ot = cand["trade"]
+            sym = ot["symbol"]
+            qty = ot.get("quantity", 0)
+            half_qty = qty / 2
+            if half_qty * cand["current_price"] < 0.5:
+                continue
+
+            close_side = "sell" if ot.get("side") == "buy" else "buy"
+            try:
+                exit_order = await self.exchange.create_order(
+                    exchange_id, sym, close_side, half_qty,
+                )
+            except Exception:
+                continue
+
+            exit_price = exit_order["price"]
+            exit_fee = exit_order["fee"]
+            entry_fee_half = (ot.get("entry_fee_usd", 0) or 0) / 2
+
+            if ot.get("side") == "buy":
+                gross_pnl = (exit_price - ot["entry_price"]) * half_qty
+            else:
+                gross_pnl = (ot["entry_price"] - exit_price) * half_qty
+            net_pnl = gross_pnl - entry_fee_half - exit_fee
+
+            await self.risk.update_daily_pnl(net_pnl)
+            half_pos_usd = ot["entry_price"] * half_qty
+            await self.risk.release_bucket(
+                ot.get("bot_type", self.bot_type.value), half_pos_usd,
+            )
+
+            ts.reduce_position(ot["id"], half_qty, net_pnl, exit_fee)
+
+            for at in self.active_trades:
+                if at.get("symbol") == sym and at.get("order_id") == str(ot.get("id", "")):
+                    at["amount"] = qty - half_qty
+                    at["position_usd"] = at["entry_price"] * at["amount"]
+                    break
+
+            displaced += 1
+            logger.info(
+                f"DISPLACEMENT: sold half of {sym} (WR={cand['wr']*100:.0f}%) "
+                f"to fund higher-WR trade. PnL=${net_pnl:.4f}"
+            )
+
+            if self.exchange.balances.get("USDT", 0) >= cash_needed:
+                break
+
+        return displaced
 
     async def execute_trade(
         self, exchange_id: str, symbol: str, signal: SignalResult,

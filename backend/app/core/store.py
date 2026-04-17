@@ -138,6 +138,20 @@ class TradeStore:
                 return t
         return None
 
+    def reduce_position(self, trade_id: int, qty_removed: float, partial_pnl: float, exit_fee: float) -> Optional[dict]:
+        for t in self.trades:
+            if t["id"] == trade_id:
+                old_qty = t.get("quantity", 0)
+                t["quantity"] = max(0, old_qty - qty_removed)
+                t.setdefault("partial_pnl_usd", 0)
+                t["partial_pnl_usd"] = round(t["partial_pnl_usd"] + partial_pnl, 5)
+                t.setdefault("partial_fees_usd", 0)
+                t["partial_fees_usd"] = round(t["partial_fees_usd"] + exit_fee, 5)
+                self._running_balance += partial_pnl
+                self._save()
+                return t
+        return None
+
     def get_open_trades(self) -> list[dict]:
         return [t for t in self.trades if t.get("status") == "open"]
 

@@ -138,6 +138,23 @@ class RiskEngine:
             setattr(allocation, attr, max(0, getattr(allocation, attr) - amount_usd))
         await self.save_bucket_allocation(allocation)
 
+    def _get_total_open_notional(self) -> float:
+        if self._trade_store_ref:
+            ts = self._trade_store_ref
+        else:
+            from app.core.store import trade_store as ts
+        total = 0.0
+        for t in ts.get_open_trades():
+            total += (t.get("entry_price", 0) or 0) * (t.get("quantity", 0) or 0)
+        return total
+
+    def _get_net_deposits(self) -> float:
+        if self._trade_store_ref:
+            ts = self._trade_store_ref
+        else:
+            from app.core.store import trade_store as ts
+        return ts.total_deposits() - ts.total_withdrawals()
+
     async def assess_trade(
         self,
         bot_type: str,
@@ -152,6 +169,17 @@ class RiskEngine:
                 approved=False, position_size_usd=0, stop_loss_price=0,
                 take_profit_price=None, risk_reward_ratio=0, max_loss_usd=0,
                 reasoning="Circuit breaker triggered", bucket=bot_type,
+            )
+
+        net_deposits = self._get_net_deposits()
+        open_notional = self._get_total_open_notional()
+        max_notional = max(net_deposits, 1.0) * 1.5
+        if open_notional >= max_notional:
+            return RiskAssessment(
+                approved=False, position_size_usd=0, stop_loss_price=0,
+                take_profit_price=None, risk_reward_ratio=0, max_loss_usd=0,
+                reasoning=f"Leverage cap: ${open_notional:.2f} notional >= 1.5x deposits (${max_notional:.2f})",
+                bucket=bot_type,
             )
 
         real_balance = self._get_real_usdt_balance()
@@ -212,10 +240,12 @@ class RiskEngine:
                 stop_loss = entry_price * (1 + max_sl_pct)
         position_size = self.calculate_position_size(available, risk_pct, entry_price, stop_loss, fee_rate)
         position_size = min(position_size, available)
-        position_size = min(position_size, real_balance * 0.95)
 
-        max_per_trade = allocation.total_capital_usd * 0.40
+        max_per_trade = real_balance * 0.25
         position_size = min(position_size, max_per_trade)
+
+        notional_room = max(max_notional - open_notional, 0)
+        position_size = min(position_size, notional_room)
 
         min_pos = 1.0
         if position_size < min_pos:
